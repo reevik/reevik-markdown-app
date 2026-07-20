@@ -61,18 +61,25 @@ export default function VaultChooser({ onOpen }: Props) {
   }
 
   return (
-    <div className="flex h-screen flex-col items-center" data-tauri-drag-region>
+    <div className="relative flex h-screen flex-col" data-tauri-drag-region>
+      {/* Soft aurora in the app's indigo/violet, so the launcher isn't flat grey. */}
+      <div className="vault-aurora" aria-hidden>
+        <span className="vault-aurora-accent" />
+      </div>
+
       {/* draggable region incl. space for traffic lights */}
       <div className="h-14 w-full shrink-0" data-tauri-drag-region />
 
-      <div className="rise flex w-full max-w-md flex-1 flex-col px-8 pb-10">
-        <div className="mb-6 text-center">
-          <AppLogo />
-          <p className="mt-3 text-[13px] text-[var(--text-secondary)]">Open a vault to start writing.</p>
-        </div>
+      {/* Centred, and sized to its content — the list must not stretch to fill. */}
+      <div className="relative flex flex-1 items-center justify-center px-8 pb-16" data-tauri-drag-region>
+        <div className="rise w-full max-w-sm">
+          <div className="mb-6 text-center">
+            <AppLogo />
+            <p className="mt-3 text-[13px] text-[var(--text-secondary)]">Open a vault to start writing.</p>
+          </div>
 
-        {/* Known vaults */}
-        <div className="card min-h-0 flex-1 overflow-auto p-2">
+          {/* Known vaults */}
+          <div className="card vault-card max-h-[42vh] overflow-auto p-2">
           {vaults && vaults.length > 0 ? (
             vaults.map((v) => (
               <button
@@ -103,49 +110,50 @@ export default function VaultChooser({ onOpen }: Props) {
           )}
         </div>
 
-        {/* Create new vault */}
-        {creating ? (
-          <div className="mt-4 flex flex-col gap-2">
-            <input
-              autoFocus
-              value={newName}
-              placeholder="New vault name"
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") createNewVault();
-                if (e.key === "Escape") setCreating(false);
-              }}
-              className="field w-full px-3 py-2 text-[13px]"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => setCreating(false)} className="btn-bezel flex-1 py-2 text-[13px]">
-                Cancel
+          {/* Create new vault */}
+          {creating ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <input
+                autoFocus
+                value={newName}
+                placeholder="New vault name"
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") createNewVault();
+                  if (e.key === "Escape") setCreating(false);
+                }}
+                className="field w-full px-3 py-2 text-[13px]"
+              />
+              <div className="flex gap-2">
+                <button onClick={() => setCreating(false)} className="btn-bezel flex-1 py-2 text-[13px]">
+                  Cancel
+                </button>
+                <button
+                  onClick={createNewVault}
+                  disabled={!newName.trim() || busy}
+                  className="btn-accent flex-1 py-2 text-[13px]"
+                >
+                  {busy ? "Creating…" : "Choose location & create"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 flex gap-2">
+              <button onClick={openExistingFolder} className="btn-bezel flex-1 py-2 text-[13px]">
+                Open folder…
               </button>
-              <button
-                onClick={createNewVault}
-                disabled={!newName.trim() || busy}
-                className="btn-accent flex-1 py-2 text-[13px]"
-              >
-                {busy ? "Creating…" : "Choose location & create"}
+              <button onClick={() => setCreating(true)} className="btn-accent flex-1 py-2 text-[13px]">
+                Create new vault
               </button>
             </div>
-          </div>
-        ) : (
-          <div className="mt-4 flex gap-2">
-            <button onClick={openExistingFolder} className="btn-bezel flex-1 py-2 text-[13px]">
-              Open folder…
-            </button>
-            <button onClick={() => setCreating(true)} className="btn-accent flex-1 py-2 text-[13px]">
-              Create new vault
-            </button>
-          </div>
-        )}
+          )}
 
-        {error && (
-          <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-[11px] leading-relaxed text-red-700">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-[11px] leading-relaxed text-red-700">
+              {error}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

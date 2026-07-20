@@ -153,6 +153,44 @@ pub fn delete_path(path: &Path) -> Result<()> {
 }
 
 /// Rejects names that would escape the current directory or are empty.
+/// Copies an external file into `dir` without ever overwriting: a clashing name
+/// gains a " 2", " 3" … suffix. Plain-text imports are renamed to `.md` so they
+/// show up in the vault tree. Returns the path of the new file.
+pub fn import_into(src: &Path, dir: &Path) -> Result<PathBuf> {
+    if !src.is_file() {
+        bail!("{} is not a file", src.display());
+    }
+    if !dir.is_dir() {
+        bail!("{} is not a directory", dir.display());
+    }
+
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Untitled");
+    let stem = sanitize_name(stem)?;
+
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("md")
+        .to_lowercase();
+    let ext = if ext == "markdown" { "markdown" } else if ext == "md" { "md" } else { "md" };
+
+    let mut target = dir.join(format!("{stem}.{ext}"));
+    let mut n = 2;
+    while target.exists() {
+        target = dir.join(format!("{stem} {n}.{ext}"));
+        n += 1;
+    }
+
+    std::fs::copy(src, &target)
+        .with_context(|| format!("copying {} into {}", src.display(), dir.display()))?;
+    Ok(target)
+}
+
 fn sanitize_name(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {

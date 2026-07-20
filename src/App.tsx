@@ -261,6 +261,13 @@ function App() {
       { id: "file.new-note", group: "File", title: "New note", hint: "⌘N", run: () => window.dispatchEvent(new Event("reevik:new-note")) },
       { id: "file.new-folder", group: "File", title: "New folder", hint: "⌘⇧N", run: () => window.dispatchEvent(new Event("reevik:new-folder")) },
       {
+        id: "file.add-to-vault",
+        group: "File",
+        title: "Add to vault…",
+        hint: "⌘⇧I",
+        run: () => window.dispatchEvent(new Event("reevik:add-to-vault")),
+      },
+      {
         id: "file.export-pdf",
         group: "File",
         title: "Export as PDF…",

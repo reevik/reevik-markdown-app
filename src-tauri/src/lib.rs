@@ -105,9 +105,18 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+P"),
             )?;
+            let add_to_vault = MenuItem::with_id(
+                handle,
+                "file.add-to-vault",
+                "Add to Vault…",
+                true,
+                Some("CmdOrCtrl+Shift+I"),
+            )?;
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_note)
                 .item(&new_folder)
+                .separator()
+                .item(&add_to_vault)
                 .separator()
                 .item(&close_tab)
                 .separator()
@@ -294,6 +303,7 @@ pub fn run() {
             commands::create_folder,
             commands::rename_path,
             commands::move_path,
+            commands::import_files,
             commands::delete_path,
             commands::set_toolbar_checked,
             commands::print_page,

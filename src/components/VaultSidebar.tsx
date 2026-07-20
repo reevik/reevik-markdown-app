@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   createFolder,
   createNote,
   deletePath,
+  importFiles,
   movePath,
   readVaultTree,
   renamePath,
@@ -80,6 +82,7 @@ export default function VaultSidebar({
   });
 
   const refreshTree = () => qc.invalidateQueries({ queryKey: ["tree", activeVault.path] });
+  const rootDir = activeVault.path;
 
   const filtering = filter.trim() !== "";
   const displayed = useMemo(() => {
@@ -131,6 +134,25 @@ export default function VaultSidebar({
     if (from) moveMutation.mutate({ from, dir });
   };
 
+  // "Add to Vault": copy external Markdown/text files in, then open the first one.
+  const importMutation = useMutation({
+    mutationFn: (sources: string[]) => importFiles(rootDir, sources),
+    onSuccess: (paths) => {
+      refreshTree();
+      if (paths[0]) onOpenNote(paths[0]);
+    },
+  });
+
+  async function addToVault() {
+    const picked = await open({
+      multiple: true,
+      title: "Add files to vault",
+      filters: [{ name: "Markdown & text", extensions: ["md", "markdown", "txt", "text"] }],
+    });
+    const sources = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    if (sources.length > 0) importMutation.mutate(sources);
+  }
+
   function toggle(path: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -144,18 +166,19 @@ export default function VaultSidebar({
     if (window.confirm(`Delete this ${what}?\n\n${node.name}`)) deleteMutation.mutate(node.path);
   }
 
-  const rootDir = activeVault.path;
-
   // The command palette has no handle on this component's state, so it asks for
   // new notes/folders via window events.
   useEffect(() => {
     const note = () => setCreating({ kind: "note", dir: rootDir });
     const folder = () => setCreating({ kind: "folder", dir: rootDir });
+    const add = () => void addToVault();
     window.addEventListener("reevik:new-note", note);
     window.addEventListener("reevik:new-folder", folder);
+    window.addEventListener("reevik:add-to-vault", add);
     return () => {
       window.removeEventListener("reevik:new-note", note);
       window.removeEventListener("reevik:new-folder", folder);
+      window.removeEventListener("reevik:add-to-vault", add);
     };
   }, [rootDir]);
 
@@ -256,6 +279,9 @@ export default function VaultSidebar({
         </ToolbarButton>
         <ToolbarButton onClick={() => setCreating({ kind: "folder", dir: rootDir })} title="New folder">
           <FolderPlusIcon />
+        </ToolbarButton>
+        <ToolbarButton onClick={() => void addToVault()} title="Add existing files to this vault (⌘⇧I)">
+          <ImportIcon />
         </ToolbarButton>
       </div>
     </aside>
@@ -555,6 +581,16 @@ function FilePlusIcon() {
     </svg>
   );
 }
+function ImportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v10" />
+      <path d="M8.5 9.5L12 13l3.5-3.5" />
+      <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3" />
+    </svg>
+  );
+}
+
 function FolderPlusIcon() {
   return (
     <svg {...svgProps(16)}>

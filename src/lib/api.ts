@@ -53,6 +53,11 @@ export function renamePath(from: string, name: string): Promise<string> {
   return invoke("rename_path", { from, name });
 }
 
+/** Copy external files into `dir`; returns the paths of the new copies. */
+export function importFiles(dir: string, sources: string[]): Promise<string[]> {
+  return invoke("import_files", { dir, sources });
+}
+
 /** Move a file/folder into `dir`; returns the new path. */
 export function movePath(from: string, dir: string): Promise<string> {
   return invoke("move_path", { from, dir });

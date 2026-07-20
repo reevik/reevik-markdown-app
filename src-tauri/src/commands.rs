@@ -161,6 +161,24 @@ pub fn rename_path(from: String, name: String, state: State<'_, AppState>) -> Re
         .map_err(|e| e.to_string())
 }
 
+/// Copy external files into the vault. Only the destination is path-guarded —
+/// the sources are deliberately outside the vault, which is the whole point.
+#[tauri::command]
+pub fn import_files(
+    dir: String,
+    sources: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let d = PathBuf::from(&dir);
+    ensure_within_vaults(&d, &state)?;
+    let mut added = Vec::new();
+    for s in sources {
+        let path = fs_vault::import_into(Path::new(&s), &d).map_err(|e| e.to_string())?;
+        added.push(path.to_string_lossy().to_string());
+    }
+    Ok(added)
+}
+
 #[tauri::command]
 pub fn move_path(from: String, dir: String, state: State<'_, AppState>) -> Result<String, String> {
     let f = PathBuf::from(&from);

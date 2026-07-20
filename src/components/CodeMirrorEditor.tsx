@@ -12,6 +12,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { syntaxTree, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import type { SyntaxNode } from "@lezer/common";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
@@ -21,6 +22,7 @@ import { INSERT_ACTIONS } from "./InsertToolbar";
 import type { VisualizationSpec } from "vega-embed";
 import type { Config } from "vega";
 import "katex/dist/katex.min.css";
+import { marked } from "marked";
 import { VEGA_CONFIG } from "../lib/chartTheme";
 
 interface Props {
@@ -106,7 +108,9 @@ const highlightStyle = HighlightStyle.define([
   { tag: t.url, color: "var(--text-tertiary)" },
   { tag: t.monospace, fontFamily: '"SF Mono", ui-monospace, Menlo, monospace', color: "#c7254e" },
   { tag: t.quote, color: "var(--text-secondary)" },
-  { tag: t.list, color: "var(--accent)" },
+  // NB: `t.list` sits on the BulletList/ListItem container, so colouring it here
+  // would tint every list item's whole text. The bullet itself is decorated with
+  // `.cm-list-mark` instead.
   { tag: t.contentSeparator, color: "var(--text-tertiary)" },
   { tag: t.processingInstruction, color: "var(--text-tertiary)" },
   // Code-token colours for fenced blocks (nested languages).
@@ -938,6 +942,387 @@ const mathDecoration = EditorView.decorations.compute(["doc", "selection"], (sta
   );
 });
 
+// --- GFM tables ------------------------------------------------------------
+
+type Align = "left" | "center" | "right";
+
+interface TableBlock {
+  from: number;
+  to: number;
+  header: string[];
+  rows: string[][];
+  align: Align[];
+  editing: boolean;
+}
+
+/** A delimiter row: `|---|:--:|---:|` — what makes the block above it a table. */
+const DELIMITER_ROW = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+
+/** Split a row on unescaped pipes, dropping the optional leading/trailing ones. */
+function splitRow(line: string): string[] {
+  const cells: string[] = [];
+  let cur = "";
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === "\\" && line[i + 1] === "|") {
+      cur += "|";
+      i++;
+    } else if (c === "|") {
+      cells.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  cells.push(cur);
+  if (cells.length && cells[0].trim() === "") cells.shift();
+  if (cells.length && cells[cells.length - 1].trim() === "") cells.pop();
+  return cells.map((c) => c.trim());
+}
+
+function alignmentsFrom(line: string): Align[] {
+  return splitRow(line).map((c) => {
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    return left && right ? "center" : right ? "right" : "left";
+  });
+}
+
+/** Finds GFM tables: a header row, a delimiter row, then body rows. */
+function tableBlocks(state: EditorState): TableBlock[] {
+  const out: Omit<TableBlock, "editing">[] = [];
+  const doc = state.doc;
+  let n = 1;
+  while (n < doc.lines) {
+    const head = doc.line(n);
+    const next = doc.line(n + 1);
+    if (head.text.includes("|") && DELIMITER_ROW.test(next.text) && next.text.includes("-")) {
+      const align = alignmentsFrom(next.text);
+      const header = splitRow(head.text);
+      const rows: string[][] = [];
+      let m = n + 2;
+      while (m <= doc.lines) {
+        const t = doc.line(m).text;
+        if (!t.includes("|") || t.trim() === "") break;
+        rows.push(splitRow(t));
+        m += 1;
+      }
+      out.push({ from: head.from, to: doc.line(m - 1).to, header, rows, align });
+      n = m;
+      continue;
+    }
+    n += 1;
+  }
+  return out.map((b) => ({
+    ...b,
+    editing: state.selection.ranges.some((r) => r.from <= b.to && r.to >= b.from),
+  }));
+}
+
+class TableWidget extends WidgetType {
+  constructor(private readonly block: Omit<TableBlock, "editing">) {
+    super();
+  }
+
+  eq(other: TableWidget) {
+    return JSON.stringify(this.block) === JSON.stringify(other.block);
+  }
+
+  toDOM() {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-table-wrap";
+    const table = document.createElement("table");
+    table.className = "cm-table";
+
+    const alignOf = (i: number) => this.block.align[i] ?? "left";
+    // Cells may contain inline Markdown (bold, code, links) — render it rather
+    // than showing the raw syntax inside an otherwise-rendered table.
+    const cell = (tag: "th" | "td", text: string, i: number) => {
+      const el = document.createElement(tag);
+      el.style.textAlign = alignOf(i);
+      try {
+        el.innerHTML = marked.parseInline(text, { async: false }) as string;
+      } catch {
+        el.textContent = text;
+      }
+      return el;
+    };
+
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    this.block.header.forEach((h, i) => hr.appendChild(cell("th", h, i)));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const row of this.block.rows) {
+      const tr = document.createElement("tr");
+      // Pad/trim so a ragged row still lines up with the header.
+      for (let i = 0; i < this.block.header.length; i++) {
+        tr.appendChild(cell("td", row[i] ?? "", i));
+      }
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+const tableDecoration = EditorView.decorations.compute(["doc", "selection"], (state) => {
+  const blocks = tableBlocks(state).filter((b) => !b.editing);
+  if (blocks.length === 0) return Decoration.none;
+  return Decoration.set(
+    blocks.map((b) =>
+      Decoration.replace({ widget: new TableWidget(b), block: true }).range(b.from, b.to),
+    ),
+    true,
+  );
+});
+
+// --- Horizontal rules ------------------------------------------------------
+
+interface HrBlock {
+  from: number;
+  to: number;
+  editing: boolean;
+}
+
+/** `---`, `***`, `___` on their own line — rendered as an actual rule. */
+function hrBlocks(state: EditorState): HrBlock[] {
+  // The `---` fences of YAML frontmatter parse as rules too; that block has its
+  // own widget, so skip anything inside it.
+  const fmEnd = frontmatterEnd(state);
+  const out: Omit<HrBlock, "editing">[] = [];
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name !== "HorizontalRule" || node.from < fmEnd) return;
+      out.push({ from: node.from, to: node.to });
+    },
+  });
+  return out.map((b) => ({
+    ...b,
+    editing: state.selection.ranges.some((r) => r.from <= b.to && r.to >= b.from),
+  }));
+}
+
+class HrWidget extends WidgetType {
+  eq() {
+    return true; // all rules render identically
+  }
+
+  toDOM() {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-hr-wrap";
+    wrap.appendChild(document.createElement("hr"));
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+const hrDecoration = EditorView.decorations.compute(["doc", "selection"], (state) => {
+  const blocks = hrBlocks(state).filter((b) => !b.editing);
+  if (blocks.length === 0) return Decoration.none;
+  return Decoration.set(
+    blocks.map((b) => Decoration.replace({ widget: new HrWidget(), block: true }).range(b.from, b.to)),
+    true,
+  );
+});
+
+// --- Inline HTML blocks ----------------------------------------------------
+
+/**
+ * Markdown allows raw HTML, and READMEs lean on it heavily (`<img>` screenshots,
+ * `<div align="center">`, `<details>`). We render a conservative subset.
+ *
+ * Everything is sanitised before it reaches the DOM: notes can come from anywhere
+ * (imported files, AI output, a synced folder), so unrestricted HTML would mean
+ * running someone else's script inside the app.
+ */
+const HTML_ALLOWED = new Set([
+  "a", "b", "blockquote", "br", "center", "code", "div", "details", "em", "h1", "h2",
+  "h3", "h4", "h5", "h6", "hr", "i", "img", "kbd", "li", "ol", "p", "picture", "pre",
+  "s", "samp", "small", "source", "span", "strong", "sub", "summary", "sup", "table",
+  "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
+]);
+/** Dropped entirely, contents included — these carry or fetch code. */
+const HTML_FORBIDDEN = new Set([
+  "script", "style", "iframe", "object", "embed", "form", "input", "button",
+  "link", "meta", "base", "noscript", "svg", "math",
+]);
+const HTML_ATTRS = new Set([
+  "src", "srcset", "alt", "title", "href", "width", "height", "align", "colspan",
+  "rowspan", "open", "type", "media",
+]);
+
+function safeUrl(value: string): string | null {
+  const v = value.trim();
+  if (/^(https?:)?\/\//i.test(v) || v.startsWith("data:image/")) return v;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return null; // javascript:, file:, etc.
+  return v; // relative — resolved against the vault below
+}
+
+/**
+ * Swap a failed image for a compact note. Without this a broken link still
+ * reserves its declared `width`/`height` — e.g. a 1884×1012 screenshot leaves a
+ * huge empty gap with a tiny broken-image icon in the corner.
+ */
+function attachImageFallback(img: HTMLImageElement) {
+  img.addEventListener(
+    "error",
+    () => {
+      const note = document.createElement("span");
+      note.className = "cm-html-img-error";
+      const alt = (img.getAttribute("alt") ?? "").trim();
+      const src = img.getAttribute("src") ?? "";
+      note.textContent = alt ? `Image unavailable — ${alt}` : "Image unavailable";
+      note.title = src;
+      img.replaceWith(note);
+    },
+    { once: true },
+  );
+}
+
+function sanitizeInto(host: HTMLElement, html: string, notePath: string) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+
+  const walk = (src: Node, dest: Node) => {
+    for (const node of Array.from(src.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        dest.appendChild(document.createTextNode(node.textContent ?? ""));
+        continue;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const el = node as Element;
+      const tag = el.tagName.toLowerCase();
+      if (HTML_FORBIDDEN.has(tag)) continue;
+      if (!HTML_ALLOWED.has(tag)) {
+        walk(el, dest); // unknown tag: keep its text, drop the wrapper
+        continue;
+      }
+
+      const out = document.createElement(tag);
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith("on") || !HTML_ATTRS.has(name)) continue; // no handlers
+        if (name === "src" || name === "href" || name === "srcset") {
+          const url = safeUrl(attr.value);
+          if (url === null) continue;
+          if (name === "src" && tag === "img" && !/^(https?:)?\/\/|^data:/i.test(url)) {
+            // Vault-relative image — load it through the same cache as Markdown images.
+            const img = out as HTMLImageElement;
+            img.setAttribute("alt", el.getAttribute("alt") ?? "");
+            attachImageFallback(img);
+            loadImageSrc(img, notePath, url, () => img.dispatchEvent(new Event("error")));
+            continue;
+          }
+          out.setAttribute(name, url);
+          continue;
+        }
+        out.setAttribute(name, attr.value);
+      }
+      if (tag === "img") attachImageFallback(out as HTMLImageElement);
+      walk(el, out);
+      dest.appendChild(out);
+    }
+  };
+
+  walk(parsed.body, host);
+}
+
+interface HtmlBlock {
+  from: number;
+  to: number;
+  html: string;
+  editing: boolean;
+}
+
+/**
+ * True when a paragraph contains nothing but HTML tags and whitespace.
+ *
+ * CommonMark only produces `HTMLBlock` for block-level tags (`div`, `table`, …).
+ * A standalone `<img>` or `<picture>` is *inline* HTML — parsed as `HTMLTag`
+ * inside a `Paragraph` — so matching `HTMLBlock` alone misses the most common
+ * case in a README.
+ */
+function pureHtmlParagraph(state: EditorState, p: SyntaxNode): boolean {
+  let child = p.firstChild;
+  if (!child) return false;
+  let pos = p.from;
+  while (child) {
+    if (child.name !== "HTMLTag") return false;
+    if (state.sliceDoc(pos, child.from).trim() !== "") return false;
+    pos = child.to;
+    child = child.nextSibling;
+  }
+  return state.sliceDoc(pos, p.to).trim() === "";
+}
+
+function htmlBlocks(state: EditorState): HtmlBlock[] {
+  const out: Omit<HtmlBlock, "editing">[] = [];
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      const isBlock = node.name === "HTMLBlock";
+      const isHtmlOnlyParagraph = node.name === "Paragraph" && pureHtmlParagraph(state, node.node);
+      if (!isBlock && !isHtmlOnlyParagraph) return;
+      const html = state.sliceDoc(node.from, node.to);
+      // A lone closing/opening fragment isn't worth rendering.
+      if (!/<[a-z][\s\S]*>/i.test(html)) return;
+      out.push({ from: node.from, to: node.to, html });
+      return false; // don't descend — the whole node is one widget
+    },
+  });
+  return out.map((b) => ({
+    ...b,
+    editing: state.selection.ranges.some((r) => r.from <= b.to && r.to >= b.from),
+  }));
+}
+
+class HtmlWidget extends WidgetType {
+  constructor(
+    private readonly html: string,
+    private readonly notePath: string,
+  ) {
+    super();
+  }
+
+  eq(other: HtmlWidget) {
+    return other.html === this.html && other.notePath === this.notePath;
+  }
+
+  toDOM() {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-html-block";
+    sanitizeInto(wrap, this.html, this.notePath);
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+function htmlDecoration(notePath: string): Extension {
+  return EditorView.decorations.compute(["doc", "selection"], (state) => {
+    const blocks = htmlBlocks(state).filter((b) => !b.editing);
+    if (blocks.length === 0) return Decoration.none;
+    return Decoration.set(
+      blocks.map((b) =>
+        Decoration.replace({ widget: new HtmlWidget(b.html, notePath), block: true }).range(b.from, b.to),
+      ),
+      true,
+    );
+  });
+}
+
 /** Inline `$…$` math on a single line (used by the live-preview view plugin). */
 const INLINE_MATH = /(?<![\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\$)/g;
 
@@ -977,6 +1362,8 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
   const charts = chartBlocks(view.state).filter((c) => !c.editing);
   const mermaids = mermaidBlocks(view.state).filter((m) => !m.editing);
   const maths = mathBlocks(view.state).filter((m) => !m.editing);
+  const tables = tableBlocks(view.state).filter((t) => !t.editing);
+  const htmls = htmlBlocks(view.state).filter((h) => !h.editing);
   const codeRanges: [number, number][] = [];
 
   for (const { from, to } of view.visibleRanges) {
@@ -1028,6 +1415,9 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
               deco.push(Decoration.replace({ widget }).range(node.from, node.to));
             }
           }
+        } else if (name === "ListMark") {
+          // Tint just the bullet/number, not the item's text.
+          deco.push(Decoration.mark({ class: "cm-list-mark" }).range(node.from, node.to));
         } else if (name === "Link") {
           deco.push(Decoration.mark({ class: "cm-link" }).range(node.from, node.to));
         } else if (MARK_NODES.has(name)) {
@@ -1053,6 +1443,8 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
     ...charts.map((c) => [c.from, c.to] as [number, number]),
     ...mermaids.map((m) => [m.from, m.to] as [number, number]),
     ...maths.map((m) => [m.from, m.to] as [number, number]),
+    ...tables.map((t) => [t.from, t.to] as [number, number]),
+    ...htmls.map((h) => [h.from, h.to] as [number, number]),
     ...codeRanges,
   ];
   const inSkip = (a: number, b: number) => skip.some(([x, y]) => x < b && y > a);
@@ -1213,6 +1605,9 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     chartDecoration,
     mermaidDecoration,
     mathDecoration,
+    tableDecoration,
+    hrDecoration,
+    htmlDecoration(notePath),
     imageDecoration(notePath),
   ]);
 
