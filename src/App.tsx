@@ -163,34 +163,54 @@ function App() {
     [activePath, patchDoc, scheduleSave],
   );
 
-  // Remove a tab. `save` flushes an unsaved buffer first (skip it when the file
-  // was deleted on disk, so we don't recreate it).
-  const removeTab = useCallback(
-    (path: string, save: boolean) => {
+  // Remove one or more tabs. `save` flushes unsaved buffers first (skip it when
+  // the file was deleted on disk, so we don't recreate it). If the active tab is
+  // among them, the neighbour that slid into its slot becomes active.
+  const removeTabs = useCallback(
+    (paths: string[], save: boolean) => {
+      const doomed = new Set(paths);
       const timers = saveTimers.current;
-      const timer = timers.get(path);
-      if (timer) {
-        clearTimeout(timer);
-        timers.delete(path);
-      }
       const docs = docsRef.current;
-      const idx = docs.findIndex((d) => d.path === path);
-      if (idx === -1) return;
-      if (save && docs[idx].saveState !== "saved") {
-        writeNote(path, docs[idx].content).catch((e) => console.error(e));
+      const closing = docs.filter((d) => doomed.has(d.path));
+      if (closing.length === 0) return;
+      const activeIdx = docs.findIndex((d) => d.path === activePathRef.current);
+
+      for (const doc of closing) {
+        const timer = timers.get(doc.path);
+        if (timer) {
+          clearTimeout(timer);
+          timers.delete(doc.path);
+        }
+        if (save && doc.saveState !== "saved") {
+          writeNote(doc.path, doc.content).catch((e) => console.error(e));
+        }
       }
-      const next = docs.filter((d) => d.path !== path);
+
+      const next = docs.filter((d) => !doomed.has(d.path));
       setDocs(() => next);
       setActivePath((cur) => {
-        if (cur !== path) return cur;
+        if (cur && !doomed.has(cur)) return cur;
         if (next.length === 0) return null;
-        return (next[idx] ?? next[idx - 1] ?? next[next.length - 1]).path;
+        return next[Math.min(Math.max(activeIdx, 0), next.length - 1)].path;
       });
     },
     [setDocs],
   );
 
+  const removeTab = useCallback((path: string, save: boolean) => removeTabs([path], save), [removeTabs]);
+
   const closeTab = useCallback((path: string) => removeTab(path, true), [removeTab]);
+
+  // Tab context menu: close every other tab, or all of them.
+  const closeOtherTabs = useCallback(
+    (keep: string) => removeTabs(docsRef.current.filter((d) => d.path !== keep).map((d) => d.path), true),
+    [removeTabs],
+  );
+
+  const closeAllTabs = useCallback(
+    () => removeTabs(docsRef.current.map((d) => d.path), true),
+    [removeTabs],
+  );
 
   // Follow a sidebar rename/move (migrate the affected tabs) or delete (drop the
   // tab). `oldPath` may be a folder, so remap by exact match or path prefix.
@@ -417,6 +437,8 @@ function App() {
         activePath={activePath}
         onSelectTab={openNote}
         onCloseTab={closeTab}
+        onCloseOtherTabs={closeOtherTabs}
+        onCloseAllTabs={closeAllTabs}
         onChange={onEditorChange}
         showToolbar={showToolbar}
         ref={editorApi}

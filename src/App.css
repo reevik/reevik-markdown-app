@@ -586,6 +586,16 @@ select.field option {
   width: 10px;
   height: 10px;
 }
+/* The tab strip is exactly one tab tall, so a 10px scrollbar track would make it
+   outgrow the tab row and push the trailing controls out of the bar. Scroll it
+   with the trackpad instead. */
+.tab-strip {
+  scrollbar-width: none;
+}
+.tab-strip::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
 ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.18);
   border-radius: 9999px;

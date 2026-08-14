@@ -2,11 +2,10 @@
   <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Reevik icon">
 </p>
 
-<h1 align="center">Reevik</h1>
+<h1 align="center">Reevik Markdown Editor</h1>
 
 <p align="center">
-  A glossy Markdown editor for macOS — Obsidian-style vaults, live preview,<br>
-  embedded charts and diagrams, and a built-in Claude writing agent.
+<b>A glossy Markdown editor for macOS — Obsidian-style vaults, live preview embedded charts and diagrams, and a built-in Claude writing agent.</b>
 </p>
 
 <p align="center">
@@ -14,6 +13,17 @@
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-111" alt="platform">
   <img src="https://img.shields.io/badge/licence-Apache%202.0-1baf7a" alt="licence">
 </p>
+
+<table align="center">
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/vault-enter.png" alt="Live preview with tabs and the file tree">
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/AI-collab.png" alt="A Vega-Lite chart and a Mermaid diagram in a note">
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -97,15 +107,9 @@ your own **Anthropic API key**, stored in the macOS Keychain.
 
 ## Getting started
 
-Download `Reevik_1.0.0_aarch64.dmg` from the releases page and drag Reevik to your
-Applications folder.
+Download the latest artifact from releases and install it.
 
-The build is ad-hoc signed rather than notarised, so macOS warns on first launch —
-right-click → **Open**, or:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/Reevik.app
-```
+> The build is ad-hoc signed rather than notarised, so macOS warns on first launch — right-click → **Open**.
 
 ### Building from source
 
@@ -116,14 +120,6 @@ npm install
 npm run tauri dev     # run in development
 npm run tauri build   # produce a .app and .dmg
 ```
-
-## Built with
-
-[Tauri 2](https://tauri.app) · [React 19](https://react.dev) ·
-[TypeScript](https://www.typescriptlang.org) · [Vite](https://vite.dev) ·
-[Tailwind CSS](https://tailwindcss.com) · [CodeMirror 6](https://codemirror.net) ·
-[Vega-Lite](https://vega.github.io/vega-lite/) · [Mermaid](https://mermaid.js.org) ·
-[KaTeX](https://katex.org)
 
 ## Licence
 

@@ -1,4 +1,14 @@
-import { forwardRef, useImperativeHandle, useRef, type Dispatch, type SetStateAction } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { createPortal } from "react-dom";
 import CodeMirrorEditor, { type EditorHandle, type EditSpec } from "./CodeMirrorEditor";
 import InsertToolbar from "./InsertToolbar";
 import StatusBar from "./StatusBar";
@@ -11,6 +21,8 @@ interface Props {
   activePath: string | null;
   onSelectTab: (path: string) => void;
   onCloseTab: (path: string) => void;
+  onCloseOtherTabs: (keep: string) => void;
+  onCloseAllTabs: () => void;
   onChange: (next: string) => void;
   showToolbar: boolean;
   mode: Mode;
@@ -33,6 +45,8 @@ const Editor = forwardRef<EditorApi, Props>(function Editor(
     activePath,
     onSelectTab,
     onCloseTab,
+    onCloseOtherTabs,
+    onCloseAllTabs,
     onChange,
     showToolbar,
     mode,
@@ -74,7 +88,14 @@ const Editor = forwardRef<EditorApi, Props>(function Editor(
           are the window drag handle. The right controls are always shown. */}
       <div className="flex h-11 shrink-0 items-end px-2 pt-2" data-tauri-drag-region>
         {docs.length > 0 ? (
-          <TabStrip docs={docs} activePath={activePath} onSelect={onSelectTab} onClose={onCloseTab} />
+          <TabStrip
+            docs={docs}
+            activePath={activePath}
+            onSelect={onSelectTab}
+            onClose={onCloseTab}
+            onCloseOthers={onCloseOtherTabs}
+            onCloseAll={onCloseAllTabs}
+          />
         ) : (
           <div className="h-9 min-w-[12px] flex-1 border-b border-black/10" data-tauri-drag-region />
         )}
@@ -186,21 +207,36 @@ function TabStrip({
   activePath,
   onSelect,
   onClose,
+  onCloseOthers,
+  onCloseAll,
 }: {
   docs: OpenDoc[];
   activePath: string | null;
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
+  onCloseOthers: (keep: string) => void;
+  onCloseAll: () => void;
 }) {
+  // Keep the active tab reachable: the strip scrolls but shows no scrollbar.
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activePath]);
+
+  // Right-clicked tab + where to pop its menu, or null when no menu is open.
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+
   return (
-    // Empty space after the tabs doubles as the window drag handle.
-    <div className="flex min-w-0 flex-1 items-end overflow-x-auto" data-tauri-drag-region>
+    // Empty space after the tabs doubles as the window drag handle. The height is
+    // pinned to one tab so an overflowing strip never grows the tab row.
+    <div className="tab-strip flex h-9 min-w-0 flex-1 select-none items-end overflow-x-auto" data-tauri-drag-region>
       {docs.map((d) => {
         const active = d.path === activePath;
         const dirty = d.saveState !== "saved";
         return (
           <div
             key={d.path}
+            ref={active ? activeRef : undefined}
             onClick={() => onSelect(d.path)}
             // Middle-click closes the tab, like a browser.
             onMouseDown={(e) => {
@@ -208,6 +244,10 @@ function TabStrip({
                 e.preventDefault();
                 onClose(d.path);
               }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ path: d.path, x: e.clientX, y: e.clientY });
             }}
             title={d.path}
             // Active tab: top/side border with an OPEN bottom, so it breaks the
@@ -245,7 +285,100 @@ function TabStrip({
       })}
       {/* Empty region after the tabs: carries the baseline + drag handle. */}
       <div className="h-9 min-w-[12px] flex-1 border-b border-black/10" data-tauri-drag-region />
+
+      {menu && (
+        <TabMenu
+          x={menu.x}
+          y={menu.y}
+          onDismiss={() => setMenu(null)}
+          items={[
+            { label: "Close", run: () => onClose(menu.path) },
+            { label: "Close Others", disabled: docs.length < 2, run: () => onCloseOthers(menu.path) },
+            { label: "Close All", run: onCloseAll },
+          ]}
+        />
+      )}
     </div>
+  );
+}
+
+// --- Tab context menu ---
+
+interface MenuItem {
+  label: string;
+  disabled?: boolean;
+  run: () => void;
+}
+
+/** Right-click menu for a tab. Rendered in a portal so the scrolling tab strip
+ *  can't clip it, and nudged back inside the window near the right/bottom edge. */
+function TabMenu({
+  x,
+  y,
+  items,
+  onDismiss,
+}: {
+  x: number;
+  y: number;
+  items: MenuItem[];
+  onDismiss: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    setPos({
+      x: Math.max(4, Math.min(x, window.innerWidth - width - 4)),
+      y: Math.max(4, Math.min(y, window.innerHeight - height - 4)),
+    });
+  }, [x, y]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onDismiss);
+    window.addEventListener("resize", onDismiss);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onDismiss);
+      window.removeEventListener("resize", onDismiss);
+    };
+  }, [onDismiss]);
+
+  return createPortal(
+    // Full-screen catcher: any click outside (either button) dismisses.
+    <div className="fixed inset-0 z-50" onMouseDown={onDismiss} onContextMenu={(e) => e.preventDefault()}>
+      <div
+        ref={ref}
+        style={{ left: pos.x, top: pos.y }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="content-pane fixed min-w-[160px] select-none overflow-hidden rounded-lg py-1 shadow-xl"
+      >
+        {items.map((item) => (
+          <button
+            key={item.label}
+            disabled={item.disabled}
+            onClick={() => {
+              onDismiss();
+              item.run();
+            }}
+            className={`flex w-full items-center px-3 py-1.5 text-left text-[13px] ${
+              item.disabled
+                ? "text-[var(--text-tertiary)]"
+                : "text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)]"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
