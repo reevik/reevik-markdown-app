@@ -5,7 +5,7 @@
 <h1 align="center">Reevik Markdown Editor</h1>
 
 <p align="center">
-<b>A glossy Markdown editor for macOS — Obsidian-style vaults, live preview embedded charts and diagrams, and a built-in Claude writing agent.</b>
+<b>A glossy Markdown editor for macOS — Obsidian-style vaults, live preview embedded charts and diagrams, and a built-in Claude writing agent. (Claude Code required)</b>
 </p>
 
 <p align="center">
