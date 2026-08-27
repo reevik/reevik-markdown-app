@@ -10,6 +10,7 @@ import {
   readVaultTree,
   renamePath,
 } from "../lib/api";
+import { notifyVaultChanged } from "../lib/contentIndex";
 import type { TreeNode, Vault } from "../lib/types";
 
 interface Props {
@@ -81,7 +82,12 @@ export default function VaultSidebar({
     queryFn: () => readVaultTree(activeVault.path),
   });
 
-  const refreshTree = () => qc.invalidateQueries({ queryKey: ["tree", activeVault.path] });
+  // Every Content Index in every open note describes this same hierarchy, so a
+  // change here has to reach them too.
+  const refreshTree = () => {
+    notifyVaultChanged();
+    return qc.invalidateQueries({ queryKey: ["tree", activeVault.path] });
+  };
   const rootDir = activeVault.path;
 
   const filtering = filter.trim() !== "";

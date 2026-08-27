@@ -1,4 +1,4 @@
-use crate::fs_vault::{self, TreeNode};
+use crate::fs_vault::{self, IndexEntry, TreeNode};
 use crate::llm::{self, Review};
 use crate::{AppState, VaultRef};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -94,6 +94,23 @@ pub fn read_vault_tree(vault: String, state: State<'_, AppState>) -> Result<Vec<
     let root = PathBuf::from(&vault);
     ensure_within_vaults(&root, &state)?;
     fs_vault::read_tree(&root).map_err(|e| e.to_string())
+}
+
+/// Backs the Content Index block: every Markdown note at or below `dir`, titled
+/// from its frontmatter, ready to render as a contents list.
+#[tauri::command]
+pub fn read_content_index(
+    dir: String,
+    max_depth: usize,
+    include_headers: usize,
+    exclude: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<IndexEntry>, String> {
+    let root = PathBuf::from(&dir);
+    ensure_within_vaults(&root, &state)?;
+    let skip = exclude.map(PathBuf::from);
+    fs_vault::read_index(&root, max_depth, include_headers, skip.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -53,6 +53,7 @@ const TableIcon = () => svg(<><rect x="3" y="4" width="18" height="16" rx="2" />
 const ImageIcon = () => svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9.5" r="1.5" /><path d="M21 16l-5-5-9 9" /></>);
 const ChartIcon = () => svg(<><line x1="4" y1="20" x2="20" y2="20" /><rect x="6" y="11" width="3" height="7" fill="currentColor" stroke="none" /><rect x="11" y="7" width="3" height="11" fill="currentColor" stroke="none" /><rect x="16" y="13" width="3" height="5" fill="currentColor" stroke="none" /></>);
 const DiagramIcon = () => svg(<><rect x="9" y="3" width="6" height="4" rx="1" /><rect x="3" y="17" width="6" height="4" rx="1" /><rect x="15" y="17" width="6" height="4" rx="1" /><path d="M12 7v4M12 11H6v6M12 11h6v6" /></>);
+const ContentsIcon = () => svg(<><line x1="9" y1="6" x2="20" y2="6" /><line x1="11" y1="12" x2="20" y2="12" /><line x1="13" y1="18" x2="20" y2="18" /><circle cx="5" cy="6" r="1.1" fill="currentColor" stroke="none" /><circle cx="7" cy="12" r="1.1" fill="currentColor" stroke="none" /><circle cx="9" cy="18" r="1.1" fill="currentColor" stroke="none" /></>);
 
 export interface Item {
   key: string;
@@ -85,6 +86,8 @@ const GROUPS: Item[][] = [
     { key: "chart", title: "Chart (Vega-Lite)", icon: <ChartIcon />, spec: { before: "```vega-lite\n", after: "\n```", placeholder: CHART_TEMPLATE, block: true } },
     { key: "diagram", title: "Diagram (Mermaid)", icon: <DiagramIcon />, spec: { before: "```mermaid\n", after: "\n```", placeholder: MERMAID_TEMPLATE, block: true } },
     { key: "math", title: "Math (LaTeX)", icon: <Glyph className="text-[13px] font-semibold">∑</Glyph>, spec: { before: "$$\n", after: "\n$$", placeholder: "e = mc^2", block: true } },
+    // The fence is the whole component — the list itself is read from the vault.
+    { key: "contents", title: "Content index", icon: <ContentsIcon />, spec: { before: "```content-index\n```", block: true } },
   ],
 ];
 

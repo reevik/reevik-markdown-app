@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AiBackend, ReferenceResult, Review, TreeNode, Vault } from "./types";
+import type { AiBackend, ContentIndexEntry, ReferenceResult, Review, TreeNode, Vault } from "./types";
 
 // --- Vaults ---
 export function listVaults(): Promise<Vault[]> {
@@ -26,6 +26,23 @@ export function readVaultTree(vault: string): Promise<TreeNode[]> {
 
 export function readNote(path: string): Promise<string> {
   return invoke("read_note", { path });
+}
+
+/**
+ * Every Markdown note at or below `dir`, flattened for a contents list. Titles
+ * come from each note's frontmatter, falling back to its file name.
+ *
+ * `maxDepth` of 0 means the whole hierarchy; `includeHeaders` pulls in each
+ * note's own headings down to that `#` level (0 = none); `exclude` drops one
+ * file (the note that hosts the index).
+ */
+export function readContentIndex(
+  dir: string,
+  maxDepth: number,
+  includeHeaders: number,
+  exclude: string | null,
+): Promise<ContentIndexEntry[]> {
+  return invoke("read_content_index", { dir, maxDepth, includeHeaders, exclude });
 }
 
 export interface FileStat {

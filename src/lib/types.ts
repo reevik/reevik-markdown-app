@@ -12,6 +12,19 @@ export interface TreeNode {
   children: TreeNode[] | null;
 }
 
+/** One row of a Content Index: a note, a folder heading above them, or a heading
+ *  inside a note. `depth` is the indent level — folder nesting, plus a heading's
+ *  own `#` count. */
+export interface ContentIndexEntry {
+  title: string;
+  /** The note (or folder) this row points at — for a heading, its note. */
+  path: string;
+  kind: "file" | "dir" | "heading";
+  depth: number;
+  /** Slug of a heading row, so a link can jump to it; empty otherwise. */
+  anchor: string;
+}
+
 /** One editorial suggestion from the AI agent — a concrete original→replacement edit. */
 export interface Suggestion {
   title: string;

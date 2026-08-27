@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { EditorState, Compartment, type Extension, type Range } from "@codemirror/state";
+import { Annotation, EditorState, Compartment, type Extension, type Range } from "@codemirror/state";
 import {
   EditorView,
   Decoration,
@@ -17,6 +17,8 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { tags as t } from "@lezer/highlight";
 import { readImageDataUrl, saveAttachment } from "../lib/api";
+import { loadContentIndex, subscribeVaultChanges } from "../lib/contentIndex";
+import type { ContentIndexEntry } from "../lib/types";
 import { agentField, collabDecorations, collabKeymap, rephraseSelection } from "./collab";
 import { INSERT_ACTIONS } from "./InsertToolbar";
 import type { VisualizationSpec } from "vega-embed";
@@ -864,6 +866,421 @@ const mermaidDecoration = EditorView.decorations.compute(["doc", "selection"], (
   );
 });
 
+// --- Content Index (```content-index) — a generated, Confluence-style contents list ---
+//
+// The block holds no content of its own: the fence is a directive, and the list
+// is read off the vault each time it renders. That is what makes it immutable —
+// there is nothing in the document to edit, and nothing that can fall behind the
+// files it describes. Depth is capped with a fence token: ```content-index|2
+
+interface IndexBlock {
+  from: number;
+  to: number;
+  /** The fence's info string, the one editable thing about the block. */
+  infoFrom: number;
+  infoTo: number;
+  /** Folder levels to include; 0 means the whole hierarchy. */
+  maxDepth: number;
+  /** Deepest heading level to pull out of each note; 0 means none. */
+  includeHeaders: number;
+  editing: boolean;
+}
+
+/**
+ * Marks a transaction as the block reconfiguring itself.
+ *
+ * The list a Content Index shows is immutable, and so is its source — but its
+ * *settings* have to be changeable or the component is a dead end. Rather than
+ * reopening the text to free typing, the widget's own controls rewrite the fence
+ * and stamp the change with this, which is the one thing the read-only filter
+ * lets through.
+ */
+const contentIndexConfigEdit = Annotation.define<boolean>();
+
+function contentIndexBlocks(state: EditorState): IndexBlock[] {
+  const out: IndexBlock[] = [];
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name !== "FencedCode") return;
+      const info = node.node.getChild("CodeInfo");
+      if (!info) return;
+      const parts = state.doc.sliceString(info.from, info.to).split("|");
+      if (parts[0].trim().toLowerCase() !== "content-index") return;
+      let maxDepth = 0;
+      let includeHeaders = 0;
+      for (const p of parts.slice(1)) {
+        const t = p.trim();
+        // A bare number is the folder depth; everything else is key=value.
+        if (/^\d+$/.test(t)) {
+          maxDepth = Number(t);
+          continue;
+        }
+        const kv = /^([a-z-]+)\s*=\s*(\d+)$/i.exec(t);
+        if (!kv) continue;
+        const value = Number(kv[2]);
+        if (kv[1].toLowerCase() === "include-headers") includeHeaders = Math.min(value, 6);
+        else if (kv[1].toLowerCase() === "depth") maxDepth = value;
+      }
+      const editing = state.selection.ranges.some((r) => r.from <= node.to && r.to >= node.from);
+      out.push({
+        from: node.from,
+        to: node.to,
+        infoFrom: info.from,
+        infoTo: info.to,
+        maxDepth,
+        includeHeaders,
+        editing,
+      });
+    },
+  });
+  return out;
+}
+
+/**
+ * Where a Content Index link wants the editor to land. The note may not be open
+ * yet — the read is async and the editor remounts per note — so the request is
+ * parked here and claimed by whichever editor mounts for that path.
+ */
+let pendingAnchor: { path: string; anchor: string } | null = null;
+
+/** Put the cursor on the heading `anchor` names, and scroll it into view. */
+function scrollToAnchor(view: EditorView, anchor: string) {
+  const doc = view.state.doc;
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line.text);
+    if (!heading) continue;
+    if (slugify(heading[2].trim().replace(/#+$/, "").trim()) !== anchor) continue;
+    view.dispatch({
+      selection: { anchor: line.from },
+      effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 24 }),
+    });
+    return;
+  }
+}
+
+/** Mirrors the slug the Rust side builds, so anchors match on both ends. */
+function slugify(title: string): string {
+  let out = "";
+  for (const ch of title) {
+    if (/[\p{L}\p{N}_]/u.test(ch)) out += ch.toLowerCase();
+    else if ((ch === " " || ch === "-") && out !== "" && !out.endsWith("-")) out += "-";
+  }
+  return out.replace(/-+$/, "");
+}
+
+function dirOf(path: string): string {
+  const cut = path.lastIndexOf("/");
+  return cut > 0 ? path.slice(0, cut) : "/";
+}
+
+/**
+ * The directive is generated scaffolding, not prose, so it is read-only: putting
+ * the cursor inside a Content Index shows the raw Markdown, but typing, pasting
+ * or backspacing into it does nothing.
+ *
+ * A change that covers a whole block still goes through — otherwise a block
+ * could never be removed. So deleting one means selecting all of it (or a range
+ * around it) rather than nibbling at its edges.
+ *
+ * This lives outside the Live Preview compartment: the source is just as
+ * protected in Markdown source mode, where it is on screen the whole time.
+ */
+const contentIndexReadOnly = EditorState.changeFilter.of((tr) => {
+  // The block's own controls rewriting its settings — the sanctioned way in.
+  if (tr.annotation(contentIndexConfigEdit)) return true;
+
+  const blocks = contentIndexBlocks(tr.startState);
+  if (blocks.length === 0) return true;
+
+  const wholeBlockGoes = (block: IndexBlock) => {
+    let covered = false;
+    tr.changes.iterChangedRanges((fromA, toA) => {
+      if (fromA <= block.from && toA >= block.to) covered = true;
+    });
+    return covered;
+  };
+
+  // A flat [from, to, …] array of spans the transaction may not touch.
+  const preserve: number[] = [];
+  for (const block of blocks) {
+    if (!wholeBlockGoes(block)) preserve.push(block.from, block.to);
+  }
+  return preserve.length === 0 ? true : preserve;
+});
+
+/** Widget DOM keeps its unsubscribe here, the way ChartWidget stashes its view. */
+type DisposableEl = HTMLElement & { __dispose?: () => void };
+
+/** `path`, made relative to the note that hosts the index. */
+function relativeTo(notePath: string, path: string): string {
+  const base = `${dirOf(notePath)}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
+
+/** Bare targets are fine until they contain spaces or brackets; then `<…>`. */
+function linkTarget(rel: string): string {
+  return /[ ()<>]/.test(rel) ? `<${rel}>` : rel;
+}
+
+/** The generated list written out as the Markdown it stands for. */
+function indexAsMarkdown(notePath: string, entries: ContentIndexEntry[]): string {
+  return entries
+    .map((e) => {
+      const indent = "  ".repeat(e.depth);
+      if (e.kind === "dir") return `${indent}- ${e.title}`;
+      const target = linkTarget(`${relativeTo(notePath, e.path)}${e.anchor ? `#${e.anchor}` : ""}`);
+      return `${indent}- [${e.title}](${target})`;
+    })
+    .join("\n");
+}
+
+class ContentIndexWidget extends WidgetType {
+  constructor(
+    readonly notePath: string,
+    readonly maxDepth: number,
+    readonly includeHeaders: number,
+    /** Cursor is in the block: show the Markdown behind the list instead. */
+    readonly editing: boolean,
+  ) {
+    super();
+  }
+
+  // Only these identify the widget, so an unrelated keystroke reuses the
+  // existing DOM instead of tearing down its subscription and reloading.
+  eq(other: ContentIndexWidget) {
+    return (
+      other.notePath === this.notePath &&
+      other.maxDepth === this.maxDepth &&
+      other.includeHeaders === this.includeHeaders &&
+      other.editing === this.editing
+    );
+  }
+
+  /**
+   * Rewrite this block's fence info to persist a settings change. Located from
+   * the widget's DOM position, the way ChartWidget finds its own spec.
+   */
+  private commit(view: EditorView, wrap: HTMLElement, patch: { depth?: number; headers?: number }) {
+    const pos = view.posAtDOM(wrap);
+    const block = contentIndexBlocks(view.state).find((b) => b.from <= pos && pos <= b.to);
+    if (!block) return;
+    const depth = patch.depth ?? block.maxDepth;
+    const headers = patch.headers ?? block.includeHeaders;
+    let info = "content-index";
+    if (depth > 0) info += `|${depth}`;
+    if (headers > 0) info += `|include-headers=${headers}`;
+    view.dispatch({
+      changes: { from: block.infoFrom, to: block.infoTo, insert: info },
+      annotations: contentIndexConfigEdit.of(true),
+    });
+  }
+
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div") as DisposableEl;
+    wrap.className = this.editing ? "cm-content-index cm-ci-source" : "cm-content-index";
+
+    // Clicking the block puts the cursor inside it, which flips it to the
+    // Markdown view — the same gesture the chart and image widgets use to reveal
+    // their source. Links and the settings bar stop the event before this.
+    if (!this.editing) {
+      wrap.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        view.dispatch({ selection: { anchor: view.posAtDOM(wrap) + 1 } });
+        view.focus();
+      });
+    }
+
+    // Settings, on hover. The block's text is sealed, so this is how its two
+    // knobs are turned.
+    const toolbar = document.createElement("div");
+    toolbar.className = "cm-ci-toolbar";
+    toolbar.addEventListener("mousedown", (ev) => ev.stopPropagation());
+
+    const control = (
+      label: string,
+      options: [number, string][],
+      current: number,
+      onPick: (value: number) => void,
+    ) => {
+      const field = document.createElement("label");
+      field.className = "cm-ci-control";
+      const caption = document.createElement("span");
+      caption.textContent = label;
+      const select = document.createElement("select");
+      for (const [value, name] of options) {
+        const option = document.createElement("option");
+        option.value = String(value);
+        option.textContent = name;
+        option.selected = value === current;
+        select.appendChild(option);
+      }
+      select.addEventListener("change", () => onPick(Number(select.value)));
+      field.append(caption, select);
+      return field;
+    };
+
+    toolbar.append(
+      control(
+        "Depth",
+        [
+          [0, "All"],
+          [1, "This folder"],
+          [2, "2 levels"],
+          [3, "3 levels"],
+          [4, "4 levels"],
+        ],
+        this.maxDepth,
+        (v) => this.commit(view, wrap, { depth: v }),
+      ),
+      control(
+        "Headings",
+        [
+          [0, "None"],
+          [1, "H1"],
+          [2, "H1–H2"],
+          [3, "H1–H3"],
+          [4, "H1–H4"],
+        ],
+        this.includeHeaders,
+        (v) => this.commit(view, wrap, { headers: v }),
+      ),
+    );
+    wrap.appendChild(toolbar);
+
+    // The list is repainted on every reload; the settings bar above is not.
+    const body = document.createElement("div");
+    body.className = "cm-ci-body";
+    wrap.appendChild(body);
+
+    const note = (text: string, cls: string) => {
+      const el = document.createElement("p");
+      el.className = cls;
+      el.textContent = text;
+      body.replaceChildren(el);
+    };
+    note("Reading the vault…", "cm-ci-note");
+
+    const paint = (entries: ContentIndexEntry[]) => {
+      if (entries.length === 0) {
+        note("No other pages in this folder yet.", "cm-ci-note");
+        return;
+      }
+
+      // Cursor inside: show the Markdown this list stands for, read-only.
+      if (this.editing) {
+        const source = document.createElement("pre");
+        source.className = "cm-ci-markdown";
+        source.textContent = indexAsMarkdown(this.notePath, entries);
+        body.replaceChildren(source);
+        return;
+      }
+
+      const row = (entry: ContentIndexEntry) => {
+        const item = document.createElement("li");
+        item.className = `cm-ci-item cm-ci-${entry.kind}`;
+        if (entry.kind === "dir") {
+          // Nothing to open — a folder is a heading over the pages inside it.
+          const folder = document.createElement("span");
+          folder.className = "cm-ci-folder";
+          folder.textContent = entry.title;
+          item.appendChild(folder);
+        } else {
+          const link = document.createElement("a");
+          link.className = "cm-ci-link";
+          link.href = "#";
+          link.textContent = entry.title;
+          link.title = entry.anchor ? `${entry.path}#${entry.anchor}` : entry.path;
+          // Opening the note must win over the block's click-to-reveal.
+          link.addEventListener("mousedown", (ev) => ev.stopPropagation());
+          link.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            // Park the heading for the editor that ends up showing this note —
+            // it may still have to be read off disk and mounted.
+            pendingAnchor = entry.anchor ? { path: entry.path, anchor: entry.anchor } : null;
+            // The widget has no handle on the app's tab state; App listens.
+            window.dispatchEvent(new CustomEvent("reevik:open-note", { detail: entry.path }));
+          });
+          item.appendChild(link);
+        }
+        return item;
+      };
+
+      // The backend hands back a flat, depth-tagged, depth-first sequence; nest it
+      // into real <ul>s so the bullets and indentation come out the way a plain
+      // Markdown list does, rather than being faked with padding.
+      const root = document.createElement("ul");
+      root.className = "cm-ci-list";
+      const open: HTMLUListElement[] = [root];
+      for (const entry of entries) {
+        while (open.length <= entry.depth) {
+          const parent = open[open.length - 1];
+          const host = parent.lastElementChild;
+          const nested = document.createElement("ul");
+          // A depth jump with no parent row above it can't happen from the walk,
+          // but hanging the list off the parent keeps it well-formed either way.
+          (host ?? parent).appendChild(nested);
+          open.push(nested);
+        }
+        open.length = entry.depth + 1;
+        open[entry.depth].appendChild(row(entry));
+      }
+      body.replaceChildren(root);
+    };
+
+    let disposed = false;
+    const load = () => {
+      loadContentIndex(dirOf(this.notePath), this.maxDepth, this.includeHeaders, this.notePath)
+        .then((entries) => {
+          if (!disposed) paint(entries);
+        })
+        .catch((err: unknown) => {
+          if (disposed) return;
+          note(`⚠ ${err instanceof Error ? err.message : String(err)}`, "cm-ci-note cm-ci-error");
+        });
+    };
+
+    const unsubscribe = subscribeVaultChanges(load);
+    wrap.__dispose = () => {
+      disposed = true;
+      unsubscribe();
+    };
+    load();
+    return wrap;
+  }
+
+  destroy(dom: HTMLElement) {
+    (dom as DisposableEl).__dispose?.();
+  }
+
+  // Clicks belong to the links inside, not to the editor's cursor.
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/**
+ * Unlike the other block widgets, this one stays in place when the cursor enters
+ * it: the fence is scaffolding nobody needs to read, so edit mode shows the
+ * Markdown the list stands for instead of the directive that generated it.
+ */
+function contentIndexDecoration(notePath: string): Extension {
+  return EditorView.decorations.compute(["doc", "selection"], (state) => {
+    const blocks = contentIndexBlocks(state);
+    if (blocks.length === 0) return Decoration.none;
+    return Decoration.set(
+      blocks.map((b) =>
+        Decoration.replace({
+          widget: new ContentIndexWidget(notePath, b.maxDepth, b.includeHeaders, b.editing),
+          block: true,
+        }).range(b.from, b.to),
+      ),
+      true,
+    );
+  });
+}
+
 // --- LaTeX math ($...$ inline, $$...$$ display) rendered with KaTeX ---
 
 class MathWidget extends WidgetType {
@@ -1361,6 +1778,8 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
   const fmEnd = frontmatterRendered(view.state);
   const charts = chartBlocks(view.state).filter((c) => !c.editing);
   const mermaids = mermaidBlocks(view.state).filter((m) => !m.editing);
+  // Always replaced by a widget, editing or not — the plugin must not touch them.
+  const indexes = contentIndexBlocks(view.state);
   const maths = mathBlocks(view.state).filter((m) => !m.editing);
   const tables = tableBlocks(view.state).filter((t) => !t.editing);
   const htmls = htmlBlocks(view.state).filter((h) => !h.editing);
@@ -1379,6 +1798,7 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
         if (fmEnd > 0 && node.from < fmEnd) return;
         if (charts.some((c) => node.from >= c.from && node.from < c.to)) return;
         if (mermaids.some((m) => node.from >= m.from && node.from < m.to)) return;
+        if (indexes.some((i) => node.from >= i.from && node.from < i.to)) return;
         if (maths.some((m) => node.from >= m.from && node.from < m.to)) return;
         const name = node.name;
 
@@ -1442,6 +1862,7 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
     ...(fmEnd > 0 ? ([[0, fmEnd]] as [number, number][]) : []),
     ...charts.map((c) => [c.from, c.to] as [number, number]),
     ...mermaids.map((m) => [m.from, m.to] as [number, number]),
+    ...indexes.map((i) => [i.from, i.to] as [number, number]),
     ...maths.map((m) => [m.from, m.to] as [number, number]),
     ...tables.map((t) => [t.from, t.to] as [number, number]),
     ...htmls.map((h) => [h.from, h.to] as [number, number]),
@@ -1604,6 +2025,7 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     frontmatterDecoration,
     chartDecoration,
     mermaidDecoration,
+    contentIndexDecoration(notePath),
     mathDecoration,
     tableDecoration,
     hrDecoration,
@@ -1629,6 +2051,7 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
         EditorView.lineWrapping,
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         syntaxHighlighting(highlightStyle),
+        contentIndexReadOnly,
         theme,
         attachmentHandlers(notePath),
         compartment.of(livePreview ? liveExt : []),
@@ -1639,7 +2062,21 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     });
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
+
+    // A Content Index link asked for a heading in this note: either the click
+    // opened it (parked before this editor existed) or the note was already
+    // open, in which case the event arrives while we're mounted.
+    const claimAnchor = () => {
+      if (pendingAnchor?.path !== notePath) return;
+      const { anchor } = pendingAnchor;
+      pendingAnchor = null;
+      scrollToAnchor(view, anchor);
+    };
+    claimAnchor();
+    window.addEventListener("reevik:open-note", claimAnchor);
+
     return () => {
+      window.removeEventListener("reevik:open-note", claimAnchor);
       view.destroy();
       viewRef.current = null;
     };

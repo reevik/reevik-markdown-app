@@ -9,6 +9,7 @@ import AiPanel from "./components/AiPanel";
 import Resizer from "./components/Resizer";
 import SettingsModal from "./components/SettingsView";
 import { readNote, setToolbarChecked, writeNote } from "./lib/api";
+import { notifyVaultChanged } from "./lib/contentIndex";
 import { printNote } from "./lib/exportPdf";
 import { applyEditorFont, loadEditorFont } from "./lib/editorFont";
 import type { Vault } from "./lib/types";
@@ -39,6 +40,15 @@ export interface OpenDoc {
 function basename(path: string): string {
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
+}
+
+/** The `title:` a note declares in its frontmatter — what a Content Index lists
+ *  it under. Null when it has none and the file name stands in instead. */
+function frontmatterTitle(markdown: string): string | null {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(markdown);
+  if (!block) return null;
+  const title = /^title:(.*)$/m.exec(block[1]);
+  return title ? title[1].trim().replace(/^["']|["']$/g, "") : null;
 }
 
 function App() {
@@ -80,6 +90,8 @@ function App() {
   const activePathRef = useRef<string | null>(null);
   activePathRef.current = activePath;
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** Frontmatter title each open note last hit disk with, keyed by path. */
+  const savedTitles = useRef<Map<string, string | null>>(new Map());
 
   const setDocs = useCallback((updater: (prev: OpenDoc[]) => OpenDoc[]) => {
     setOpenDocsState((prev) => {
@@ -110,6 +122,15 @@ function App() {
           try {
             await writeNote(path, next);
             patchDoc(path, { saveState: "saved" });
+            // A Content Index lists this note under its frontmatter title, so a
+            // changed title has to reach the indexes in other open notes. Only
+            // when it actually changed — autosave fires far too often to re-walk
+            // the vault on every write.
+            const title = frontmatterTitle(next);
+            if (savedTitles.current.get(path) !== title) {
+              savedTitles.current.set(path, title);
+              notifyVaultChanged();
+            }
           } catch (e) {
             console.error(e);
             patchDoc(path, { saveState: "error" });
@@ -133,6 +154,7 @@ function App() {
       ]);
       try {
         const text = await readNote(path);
+        savedTitles.current.set(path, frontmatterTitle(text));
         patchDoc(path, { content: text, loading: false, saveState: "saved" });
       } catch (e) {
         console.error(e);
@@ -141,6 +163,17 @@ function App() {
     },
     [setDocs, patchDoc],
   );
+
+  // A Content Index link lives inside CodeMirror, well out of reach of the tab
+  // state, so it asks for a note by event.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent<string>).detail;
+      if (path) void openNote(path);
+    };
+    window.addEventListener("reevik:open-note", handler);
+    return () => window.removeEventListener("reevik:open-note", handler);
+  }, [openNote]);
 
   // Live edits coming from the editor for the active note.
   const onEditorChange = useCallback(
@@ -181,6 +214,7 @@ function App() {
           clearTimeout(timer);
           timers.delete(doc.path);
         }
+        savedTitles.current.delete(doc.path);
         if (save && doc.saveState !== "saved") {
           writeNote(doc.path, doc.content).catch((e) => console.error(e));
         }
@@ -248,6 +282,7 @@ function App() {
     (vault: Vault | null) => {
       saveTimers.current.forEach((t) => clearTimeout(t));
       saveTimers.current.clear();
+      savedTitles.current.clear();
       docsRef.current.forEach((d) => {
         if (d.saveState !== "saved") writeNote(d.path, d.content).catch((e) => console.error(e));
       });

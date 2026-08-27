@@ -296,6 +296,7 @@ pub fn run() {
             commands::create_vault,
             commands::remove_vault,
             commands::read_vault_tree,
+            commands::read_content_index,
             commands::read_note,
             commands::file_stat,
             commands::write_note,

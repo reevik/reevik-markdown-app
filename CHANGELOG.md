@@ -8,6 +8,22 @@ All notable changes to Reevik are recorded here. The format follows
 
 ### Added
 
+- **Content Index** — a ` ```content-index ` block renders an ordinary bulleted
+  list of every note in the current folder and below it, linked and ready to
+  click. The block stores nothing: the list is read from the vault on
+  every draw and refreshes whenever the hierarchy changes (new note, rename,
+  move, delete, or an edit made outside the app), so it can't drift out of date.
+  Entries are titled from each note's frontmatter `title:`, falling back to the
+  file name. Fence tokens configure it: a bare number caps the folder depth
+  (` ```content-index|2 `), and `include-headers=N` pulls each note's own
+  headings in down to that `#` level, indented by their level and linking
+  straight to that heading. Clicking the
+  block shows the Markdown the list stands for (`- [Title](path.md)`) instead of
+  the directive; both that view and the block itself are read-only, and a block
+  can only be removed whole. Its settings are changed from a hover bar on the
+  block rather than by typing — the one edit it accepts. It prints with the note
+  as a plain outline.
+
 - **Import files into a vault** — a toolbar button (`⌘⇧I`) copies existing files
   from anywhere on disk into the current vault. Clashing names gain a ` 2`, ` 3`
   suffix rather than overwriting, and plain-text imports are renamed to `.md` so
