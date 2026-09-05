@@ -24,6 +24,31 @@ interface Props {
 type Creating = { kind: "note" | "folder"; dir: string } | null;
 type SortDir = "asc" | "desc";
 
+/** Collapsed folders are remembered per vault, so reopening one restores the
+ *  shape of the tree instead of expanding everything. Storing the *collapsed*
+ *  set (rather than the expanded one) keeps a freshly-opened vault fully
+ *  expanded, which is what it did before. */
+const COLLAPSED_KEY = "tree.collapsed";
+
+function loadCollapsed(vault: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(`${COLLAPSED_KEY}:${vault}`);
+    const stored: unknown = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(stored) ? stored.filter((p): p is string => typeof p === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsed(vault: string, paths: Set<string>) {
+  try {
+    localStorage.setItem(`${COLLAPSED_KEY}:${vault}`, JSON.stringify([...paths]));
+  } catch (e) {
+    // Nothing to recover here: the tree just opens expanded next time.
+    console.error(e);
+  }
+}
+
 /** All folder paths in the tree (used by expand/collapse-all). */
 function collectFolderPaths(nodes: TreeNode[], out: string[] = []): string[] {
   for (const n of nodes) {
@@ -71,7 +96,7 @@ export default function VaultSidebar({
   onPathChanged,
 }: Props) {
   const qc = useQueryClient();
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(activeVault.path));
   const [creating, setCreating] = useState<Creating>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -89,6 +114,24 @@ export default function VaultSidebar({
     return qc.invalidateQueries({ queryKey: ["tree", activeVault.path] });
   };
   const rootDir = activeVault.path;
+
+  useEffect(() => saveCollapsed(rootDir, collapsed), [rootDir, collapsed]);
+
+  // A renamed or moved folder keeps its collapse state, and a deleted one drops
+  // it. `oldPath` may itself be a folder, so remap by exact match or prefix.
+  const pathChanged = (oldPath: string, newPath: string | null) => {
+    const affects = (p: string) => p === oldPath || p.startsWith(`${oldPath}/`);
+    setCollapsed((prev) => {
+      if (![...prev].some(affects)) return prev;
+      const next = new Set<string>();
+      for (const p of prev) {
+        if (!affects(p)) next.add(p);
+        else if (newPath) next.add(p === oldPath ? newPath : newPath + p.slice(oldPath.length));
+      }
+      return next;
+    });
+    onPathChanged(oldPath, newPath);
+  };
 
   const filtering = filter.trim() !== "";
   const displayed = useMemo(() => {
@@ -115,7 +158,7 @@ export default function VaultSidebar({
     onSuccess: (newPath, vars) => {
       setRenaming(null);
       refreshTree();
-      onPathChanged(vars.from, newPath);
+      pathChanged(vars.from, newPath);
     },
   });
 
@@ -123,7 +166,7 @@ export default function VaultSidebar({
     mutationFn: (path: string) => deletePath(path),
     onSuccess: (_r, path) => {
       refreshTree();
-      onPathChanged(path, null);
+      pathChanged(path, null);
     },
   });
 
@@ -133,7 +176,7 @@ export default function VaultSidebar({
     mutationFn: ({ from, dir }: { from: string; dir: string }) => movePath(from, dir),
     onSuccess: (newPath, vars) => {
       refreshTree();
-      onPathChanged(vars.from, newPath);
+      pathChanged(vars.from, newPath);
     },
   });
   const doMove = (from: string, dir: string) => {

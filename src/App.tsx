@@ -456,6 +456,9 @@ function App() {
       {!leftCollapsed && (
         <>
           <VaultSidebar
+            // Remount per vault, so its collapse state, filter and sort start
+            // from that vault's own remembered state rather than the last one's.
+            key={activeVault.path}
             width={leftWidth}
             activeVault={activeVault}
             selectedPath={activePath}
