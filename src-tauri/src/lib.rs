@@ -51,8 +51,10 @@ pub fn run() {
             // Explicit text so the label reads "About Reevik" even in dev (the auto
             // label otherwise uses the executable/crate name). The panel shows the
             // app icon plus an author credit.
+            // The transparent owl rather than the Dock tile: the panel draws
+            // its own background, so the tile would read as a box in a box.
             let about_icon =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")).ok();
+                tauri::image::Image::from_bytes(include_bytes!("../app-logo.png")).ok();
             let about = PredefinedMenuItem::about(
                 handle,
                 Some("About Reevik"),
