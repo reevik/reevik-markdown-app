@@ -1,3 +1,5 @@
+import type { EditOutcome } from "./agentEdits";
+
 /** A folder registered as a vault (an Obsidian-style document root). */
 export interface Vault {
   path: string;
@@ -89,5 +91,8 @@ export interface AiSettings {
  *  is stateless and receives the whole thing on every send. */
 export interface ChatMessage {
   role: "user" | "assistant";
+  /** For a reply, the text the author reads — any edit block is stripped. */
   content: string;
+  /** For a reply that changed the note: what was applied, kept with the thread. */
+  edit?: EditOutcome;
 }

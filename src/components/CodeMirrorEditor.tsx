@@ -20,6 +20,7 @@ import { readImageDataUrl, saveAttachment } from "../lib/api";
 import { loadContentIndex, subscribeVaultChanges } from "../lib/contentIndex";
 import type { ContentIndexEntry } from "../lib/types";
 import { agentField, collabDecorations, collabKeymap, rephraseSelection } from "./collab";
+import { resolveEdits, type AgentEdit } from "../lib/agentEdits";
 import { INSERT_ACTIONS } from "./InsertToolbar";
 import type { VisualizationSpec } from "vega-embed";
 import type { Config } from "vega";
@@ -46,6 +47,12 @@ export interface EditSpec {
 }
 export interface EditorHandle {
   applyEdit(spec: EditSpec): void;
+  /**
+   * Apply the Editorial agent's edits to the live document as one transaction,
+   * so they autosave like typing and a single ⌘Z takes them all back. Edits are
+   * placed against the text as it is now, not as it was when the agent read it.
+   */
+  applyAgentEdits(edits: AgentEdit[]): { applied: number; failed: string[] };
   /** Run the AI rephrase on the current selection (same as ⌘⇧R). */
   rephrase(): void;
 }
@@ -2007,6 +2014,20 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     ref,
     () => ({
       applyEdit: (spec) => applyEditToView(viewRef.current, spec),
+      applyAgentEdits: (edits) => {
+        const view = viewRef.current;
+        if (!view) return { applied: 0, failed: edits.map((e) => (e.kind === "replace" ? e.find : "")) };
+        const { changes, failed } = resolveEdits(view.state.doc.toString(), edits);
+        if (changes.length > 0) {
+          view.dispatch({
+            changes,
+            userEvent: "input.agent",
+            // Bring the first change into view so the author sees what moved.
+            effects: EditorView.scrollIntoView(changes[0].from, { y: "center" }),
+          });
+        }
+        return { applied: changes.length, failed };
+      },
       rephrase: () => {
         const view = viewRef.current;
         if (!view) return;

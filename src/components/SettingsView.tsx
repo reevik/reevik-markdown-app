@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import CliLoginHint from "./CliLoginHint";
+import Segmented from "./Segmented";
 import { aiBackend, getAiSettings, MODEL_OPTIONS, PROVIDERS, setLlmApiKey, setModel, setProvider } from "../lib/api";
 import type { AiProvider, AiSettings } from "../lib/types";
 import {
@@ -120,22 +121,14 @@ export default function SettingsModal({ onClose }: Props) {
 
           <div className="mt-3">
             <label className="text-[12px] font-medium text-[var(--text-secondary)]">Provider</label>
-            <div className="mt-1.5 flex gap-0.5 rounded-lg bg-black/[0.06] p-0.5">
-              {PROVIDERS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => provider !== p.id && saveProvider.mutate(p.id)}
-                  disabled={saveProvider.isPending}
-                  className={`flex-1 rounded-[6px] px-2 py-1 text-[12px] transition-colors ${
-                    provider === p.id
-                      ? "bg-white/80 font-medium text-[var(--text-primary)] shadow-sm"
-                      : "text-[var(--text-secondary)] hover:bg-white/40"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              className="mt-1.5"
+              size="md"
+              options={PROVIDERS}
+              value={provider}
+              onChange={(p) => saveProvider.mutate(p)}
+              disabled={saveProvider.isPending}
+            />
           </div>
 
           <div className="mt-3 flex items-start gap-2.5">

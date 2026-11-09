@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import CliLoginHint from "./CliLoginHint";
 import EditorialChat from "./EditorialChat";
+import { InlineMarkdown } from "./Markdown";
+import Segmented from "./Segmented";
 import {
   aiBackend,
   CLI_NOT_LOGGED_IN,
@@ -13,6 +15,7 @@ import {
 } from "../lib/api";
 import { parsePartialJson } from "../lib/partialJson";
 import type { Quality, Reference, ReferenceResult, Review, Suggestion } from "../lib/types";
+import type { AgentEdit, EditOutcome } from "../lib/agentEdits";
 
 interface Props {
   width: number;
@@ -21,6 +24,8 @@ interface Props {
   path: string | null;
   content: string;
   onApply: (next: string) => void;
+  /** Apply the Editorial agent's edits to a note; see App.applyAgentEdits. */
+  onApplyEdits: (notePath: string, edits: AgentEdit[]) => EditOutcome;
   /** Insert markdown at the cursor (used to drop a citation into the note). */
   onInsertText: (markdown: string) => void;
 }
@@ -38,7 +43,7 @@ const TABS: { id: Mode; label: string; hint: string }[] = [
   { id: "references", label: "References", hint: "\u2318\u21e7F" },
 ];
 
-export default function AiPanel({ width, vaultPath, path, content, onApply, onInsertText }: Props) {
+export default function AiPanel({ width, vaultPath, path, content, onApply, onApplyEdits, onInsertText }: Props) {
   const [applied, setApplied] = useState<Set<number>>(new Set());
   const [mode, setMode] = useState<Mode>("analyze");
   /** Partial review decoded from the CLI's streaming output, shown while it runs. */
@@ -203,22 +208,12 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onIn
       </header>
 
       {/* One dock, three panels. Each is also a keyboard shortcut away. */}
-      <div className="mx-3 mb-2 flex shrink-0 gap-0.5 rounded-lg bg-black/[0.06] p-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setMode(t.id)}
-            title={`${t.label} (${t.hint})`}
-            className={`flex-1 rounded-[6px] px-2 py-1 text-[11.5px] transition-colors ${
-              mode === t.id
-                ? "bg-white/80 font-medium text-[var(--text-primary)] shadow-sm"
-                : "text-[var(--text-secondary)] hover:bg-white/40"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        className="mx-3 mb-2 shrink-0"
+        options={TABS.map((t) => ({ id: t.id, label: t.label, title: `${t.label} (${t.hint})` }))}
+        value={mode}
+        onChange={setMode}
+      />
 
       {mode === "chat" ? (
         <>
@@ -240,6 +235,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onIn
             content={content}
             noBackend={noBackend}
             loggedOut={loggedOut}
+            onApplyEdits={onApplyEdits}
             onInsertText={onInsertText}
           />
         </>
@@ -288,8 +284,8 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onIn
                 {shown.quality?.score ? <QualityCard q={shown.quality} /> : null}
 
                 {shown.summary && (
-                  <p className="text-[12px] italic leading-relaxed text-[var(--text-secondary)]">
-                    {shown.summary}
+                  <p className="md-inline text-[12px] italic leading-relaxed text-[var(--text-secondary)]">
+                    <InlineMarkdown text={shown.summary} />
                   </p>
                 )}
 
@@ -462,11 +458,13 @@ function ReferencesView({
                     </p>
                   )}
                   {r.summary && (
-                    <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">{r.summary}</p>
+                    <p className="md-inline mt-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+                      <InlineMarkdown text={r.summary} />
+                    </p>
                   )}
                   {r.relevance && (
-                    <p className="mt-1 text-[11.5px] italic leading-relaxed text-[var(--text-tertiary)]">
-                      {r.relevance}
+                    <p className="md-inline mt-1 text-[11.5px] italic leading-relaxed text-[var(--text-tertiary)]">
+                      <InlineMarkdown text={r.relevance} />
                     </p>
                   )}
 

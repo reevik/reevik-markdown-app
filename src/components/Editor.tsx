@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import CodeMirrorEditor, { type EditorHandle, type EditSpec } from "./CodeMirrorEditor";
+import type { AgentEdit } from "../lib/agentEdits";
 import InsertToolbar from "./InsertToolbar";
 import StatusBar from "./StatusBar";
 import type { OpenDoc } from "../App";
@@ -36,6 +37,8 @@ interface Props {
 /** Imperative surface used by the command palette. */
 export interface EditorApi {
   applyEdit(spec: EditSpec): void;
+  /** See `EditorHandle.applyAgentEdits`; null when no note is in the editor. */
+  applyAgentEdits(edits: AgentEdit[]): { applied: number; failed: string[] } | null;
   rephrase(): void;
 }
 
@@ -64,6 +67,7 @@ const Editor = forwardRef<EditorApi, Props>(function Editor(
     ref,
     () => ({
       applyEdit: (spec) => editorRef.current?.applyEdit(spec),
+      applyAgentEdits: (edits) => editorRef.current?.applyAgentEdits(edits) ?? null,
       rephrase: () => editorRef.current?.rephrase(),
     }),
     [],

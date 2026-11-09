@@ -13,6 +13,7 @@ import { notifyVaultChanged } from "./lib/contentIndex";
 import { printNote } from "./lib/exportPdf";
 import { applyEditorFont, loadEditorFont } from "./lib/editorFont";
 import type { Vault } from "./lib/types";
+import { applyChanges, resolveEdits, type AgentEdit, type EditOutcome } from "./lib/agentEdits";
 import "./App.css";
 
 const LEFT_DEFAULT = 256;
@@ -181,6 +182,28 @@ function App() {
       if (activePath) scheduleSave(activePath, next);
     },
     [activePath, scheduleSave],
+  );
+
+  // The Editorial agent's edits. Into the live editor when that note is in it
+  // (one undoable step, saved like typing); otherwise into its buffer if it's
+  // still open in a tab, e.g. the author switched notes while the agent was
+  // thinking. A note closed since the request was sent is left alone.
+  const applyAgentEdits = useCallback(
+    (notePath: string, edits: AgentEdit[]): EditOutcome => {
+      const note = basename(notePath);
+      if (notePath === activePathRef.current) {
+        const r = editorApi.current?.applyAgentEdits(edits);
+        if (r) return { note, applied: r.applied, failed: r.failed, undoable: true };
+      }
+      const doc = docsRef.current.find((d) => d.path === notePath);
+      if (!doc || doc.loading) {
+        return { note, applied: 0, failed: [], reason: `${note} was closed before the edit arrived` };
+      }
+      const { changes, failed } = resolveEdits(doc.content, edits);
+      if (changes.length > 0) scheduleSave(notePath, applyChanges(doc.content, changes));
+      return { note, applied: changes.length, failed };
+    },
+    [scheduleSave],
   );
 
   // Replace the active note's content from outside the editor (AI "Apply"); bump
@@ -510,6 +533,7 @@ function App() {
             path={activeDoc?.path ?? null}
             content={activeDoc?.content ?? ""}
             onApply={applyContent}
+            onApplyEdits={applyAgentEdits}
             onInsertText={(md) => editorApi.current?.applyEdit({ before: md, block: true })}
           />
         </>
