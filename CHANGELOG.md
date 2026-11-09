@@ -4,7 +4,51 @@ All notable changes to Reevik are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1.beta] — unreleased
+## [1.1.0.beta] — 2026-11-09
+
+### Added
+
+- **Editorial chat** — a new tab in the AI panel (`⌘⇧E`) for talking the note
+  through with the agent: ask for a tighter opening, a counter-argument, a
+  summary. Replies stream in and render as Markdown, and can be copied or
+  inserted at the cursor. The conversation is kept per vault, survives
+  restarts, and is only wiped by **Clear**. The open note travels with every
+  message, so the agent always answers against its current text.
+- **The agent edits the note directly** — ask it to add, change or remove
+  something and it makes the change itself. All of a reply's edits apply as one
+  step, saved like typing and undone with a single `⌘Z`. A line under the reply
+  says what was applied; an edit whose target text has since changed is
+  reported rather than guessed at.
+- **GitHub Copilot as a second AI provider** — choose **Claude** or **GitHub
+  Copilot** in Settings. Copilot runs through the `copilot` CLI on your
+  Copilot plan, and each provider keeps its own model choice. Reference search
+  stays with Claude, since it needs live web search to cite real sources.
+- **Login detection** — if the Claude CLI isn't logged in, the AI panel and
+  Settings say so up front and show the command to fix it
+  (`claude auth login`), instead of failing silently.
+
+### Changed
+
+- The automatic review is now the **Analyze** tab (`⌘⇧A`), alongside
+  **Editorial** and **References** (`⌘⇧F`).
+- Reference summaries and the Analyze verdict render inline Markdown.
+- The model picker offers **Opus 5.5**, **Sonnet 5.5** and **Haiku 5.5**. With
+  an API key and no model chosen, Reevik now uses Opus 5.5, replacing the
+  deprecated Sonnet 4.5.
+- **New app icon**: the owl, in the Dock, on the opening screen and in About.
+
+### Fixed
+
+- AI errors appeared as an **empty red box**; they now show what went wrong.
+- With a logged-out Claude CLI, **Rephrase could paste the CLI's
+  "Failed to authenticate" message into the note** as if it were the
+  rephrased text. It is now treated as an error.
+- In segmented controls (the AI tabs, the Settings provider switch), the
+  selected tab overflowed the corners of its track.
+- The version shown in About and in the `.dmg` name matches the release again
+  (1.0.2 reported itself as 1.0.1).
+
+## [1.0.2] — 2026-09-05
 
 ### Added
 
@@ -23,6 +67,25 @@ All notable changes to Reevik are recorded here. The format follows
   can only be removed whole. Its settings are changed from a hover bar on the
   block rather than by typing — the one edit it accepts. It prints with the note
   as a plain outline.
+- The insert toolbar has a **Content index** button.
+
+### Changed
+
+- **The file tree remembers which folders you collapsed**, per vault, and
+  restores them on launch instead of expanding everything. A renamed or moved
+  folder keeps its state.
+- A new flat app icon.
+- Releases are built by GitHub Actions as a **universal `.dmg`** that runs on
+  both Intel and Apple Silicon Macs.
+
+### Known issues
+
+- This build reports itself as **1.0.1** in About and in its `.dmg` name: the
+  version wasn't bumped before release. Fixed in 1.1.0.beta.
+
+## [1.0.1.beta] — 2026-08-14
+
+### Added
 
 - **Import files into a vault** — a toolbar button (`⌘⇧I`) copies existing files
   from anywhere on disk into the current vault. Clashing names gain a ` 2`, ` 3`

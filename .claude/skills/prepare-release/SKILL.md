@@ -129,38 +129,39 @@ than producing both unprompted.
 
 ## 5. Build the .dmg
 
+**Releases are built by GitHub Actions**, not locally:
+`.github/workflows/release.yml` runs on any pushed tag matching `v*` and
+publishes a GitHub release with a universal (Intel + Apple Silicon) `.dmg`.
+Pushing the tag *is* the build.
+
+So the local job is to make sure the tag will build, cheaply:
+
 ```bash
-npm run tauri build
+npx tsc --noEmit        # the CI build runs `tsc && vite build` first
 ```
 
-This runs `npm run build` first (`tsc && vite build`), so a type error anywhere
-in the frontend aborts the release — worth running `npx tsc --noEmit` first if
-there are uncommitted source changes, since it fails in seconds instead of
-minutes.
+and that step 2 really is complete — the release's `.dmg` is named from
+`tauri.conf.json`, and 1.0.2 shipped as `Reevik_1.0.1_universal.dmg` because
+it wasn't.
 
-A release build compiles the Rust in `--release`, so it takes far longer than
-the dev builds: run it in the background and watch for the outcome rather than
-blocking on it. Note that cargo colour-codes its output, so anchored patterns
-like `^Finished` won't match — match on `Finished`/`error` without the anchor.
+Build locally (`npm run tauri build`, → `src-tauri/target/release/bundle/dmg/`)
+only when the user wants a copy without going through a release; that build is
+Apple Silicon only and ad-hoc signed, unlike the CI one.
 
-The artifact lands at:
+## 6. Commit, tag, push — when asked
 
+Committing, tagging and pushing are the user's call — ask, don't assume.
+
+The tag **must start with `v`**, or the release workflow never runs (this
+happened with `1.0.2`). Form: `v<version>` for a stable release, and
+`v<version>-beta` for a beta — the workflow marks a tag containing `-` as a
+GitHub prerelease. The tag goes on `main`.
+
+After pushing it, the published release can be checked without `gh`:
+
+```bash
+curl -s 'https://api.github.com/repos/reevik/reevik-markdown-app/releases?per_page=3'
 ```
-src-tauri/target/release/bundle/dmg/Reevik_<version>_aarch64.dmg
-```
-
-Confirm the filename carries the new version (it comes from
-`tauri.conf.json`, so a wrong name means step 2 was incomplete), report its size,
-and note the build is **Apple Silicon only** and **ad-hoc signed** — first launch
-needs right-click → Open, or
-`xattr -dr com.apple.quarantine /Applications/Reevik.app`. That caveat belongs in
-release notes every time.
-
-## 6. Stop there unless asked
-
-Committing, tagging and pushing are the user's call — ask, don't assume. If they
-do want a tag, the existing convention is the display version with no `v` prefix
-(`1.0.0.beta`), so match whatever suffix step 1 settled on.
 
 A short summary at the end helps: the version, the files touched, the changelog
-headline, and the path to the `.dmg`.
+headline, the tag, and where the release will appear.
