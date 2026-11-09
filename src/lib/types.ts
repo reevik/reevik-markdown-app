@@ -70,4 +70,24 @@ export interface ReferenceResult {
   references: Reference[];
 }
 
-export type AiBackend = "cli" | "api" | "none";
+/** Which backend will answer, for the selected provider.
+ *  `cli-logged-out`: the Claude CLI is installed but has no usable login (and
+ *  there is no API key to fall back to). `copilot-missing`: Copilot is the
+ *  provider but its CLI isn't installed. */
+export type AiBackend = "cli" | "api" | "none" | "cli-logged-out" | "copilot" | "copilot-missing";
+
+export type AiProvider = "claude" | "copilot";
+
+/** Mirrors the Rust `AiSettings`: the provider, plus a model per provider. */
+export interface AiSettings {
+  provider: AiProvider;
+  claude_model: string;
+  copilot_model: string;
+}
+
+/** One turn of the Editorial chat. The panel owns the transcript; the backend
+ *  is stateless and receives the whole thing on every send. */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}

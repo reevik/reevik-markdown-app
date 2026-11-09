@@ -372,9 +372,21 @@ function App() {
         run: () => editorApi.current?.rephrase(),
       },
       {
+        id: "ai.chat",
+        group: "AI",
+        title: "Editorial",
+        hint: "⌘⇧E",
+        run: () => {
+          setRightCollapsed(false);
+          // The panel is unmounted while collapsed; let it mount before it is
+          // asked to switch tabs and take focus.
+          setTimeout(() => window.dispatchEvent(new Event("reevik:ai-chat")), 60);
+        },
+      },
+      {
         id: "ai.suggest",
         group: "AI",
-        title: "Editorial review",
+        title: "Analyze document",
         hint: "⌘⇧A",
         disabled: !hasNote,
         disabledReason: noNote,
@@ -494,6 +506,7 @@ function App() {
                    onReset={() => setRightWidth(RIGHT_DEFAULT)} />
           <AiPanel
             width={rightWidth}
+            vaultPath={activeVault.path}
             path={activeDoc?.path ?? null}
             content={activeDoc?.content ?? ""}
             onApply={applyContent}

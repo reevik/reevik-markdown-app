@@ -1,5 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AiBackend, ContentIndexEntry, ReferenceResult, Review, TreeNode, Vault } from "./types";
+import type {
+  AiBackend,
+  AiProvider,
+  AiSettings,
+  ChatMessage,
+  ContentIndexEntry,
+  ReferenceResult,
+  Review,
+  TreeNode,
+  Vault,
+} from "./types";
 
 // --- Vaults ---
 export function listVaults(): Promise<Vault[]> {
@@ -112,21 +122,42 @@ export function setLlmApiKey(key: string): Promise<void> {
   return invoke("set_llm_api_key", { key });
 }
 
-/** Chosen model id; "" means let the backend pick its own default. */
-export function getModel(): Promise<string> {
-  return invoke("get_model");
+/** The AI provider and the model chosen for each; "" means that backend's own default. */
+export function getAiSettings(): Promise<AiSettings> {
+  return invoke("get_ai_settings");
 }
 
-export function setModel(model: string): Promise<void> {
-  return invoke("set_model", { model });
+export function setProvider(provider: AiProvider): Promise<AiSettings> {
+  return invoke("set_provider", { provider });
 }
 
-/** Models offered in Settings. "" keeps the CLI's own configured default. */
-export const MODEL_OPTIONS: { id: string; label: string; note: string }[] = [
-  { id: "", label: "Default", note: "Use the backend's configured model" },
-  { id: "claude-opus-4-8", label: "Opus 4.8", note: "Most capable, slowest" },
-  { id: "claude-sonnet-5", label: "Sonnet 5", note: "Balanced" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", note: "Fastest, cheapest" },
+/** Sets the model for one provider; each keeps its own choice. */
+export function setModel(provider: AiProvider, model: string): Promise<AiSettings> {
+  return invoke("set_model", { provider, model });
+}
+
+export interface ModelOption {
+  id: string;
+  label: string;
+  note: string;
+}
+
+/** Models offered in Settings, per provider. "" keeps that CLI's own default. */
+export const MODEL_OPTIONS: Record<AiProvider, ModelOption[]> = {
+  claude: [
+    { id: "", label: "Default", note: "Use the backend's configured model" },
+    { id: "claude-opus-5-5", label: "Opus 5.5", note: "Most capable" },
+    { id: "claude-sonnet-5-5", label: "Sonnet 5.5", note: "Balanced" },
+    { id: "claude-haiku-5-5", label: "Haiku 5.5", note: "Fastest, cheapest" },
+  ],
+  // Filled in from the installed Copilot CLI once its exact model ids are
+  // confirmed; until then it runs on the default from your Copilot plan.
+  copilot: [{ id: "", label: "Default", note: "Your Copilot plan's default model" }],
+};
+
+export const PROVIDERS: { id: AiProvider; label: string }[] = [
+  { id: "claude", label: "Claude" },
+  { id: "copilot", label: "GitHub Copilot" },
 ];
 
 /** Open the native print panel for the main window (macOS offers "Save as PDF"). */
@@ -157,3 +188,23 @@ export function openExternal(url: string): Promise<void> {
 export function rephrase(text: string): Promise<string> {
   return invoke("rephrase", { text });
 }
+
+/**
+ * One turn of the Editorial chat. `messages` is the full transcript (the backend
+ * keeps no session), and the open note travels alongside it so the agent always
+ * sees the current text rather than a stale copy from earlier in the thread.
+ */
+export function chat(
+  messages: ChatMessage[],
+  notePath: string | null,
+  noteText: string,
+): Promise<string> {
+  return invoke("chat", { messages, notePath, noteText });
+}
+
+/** The error a backend call returns, instead of a raw message, when the Claude
+ *  CLI has no usable login. Panels show the fix rather than the failure. */
+export const CLI_NOT_LOGGED_IN = "claude-cli-not-logged-in";
+
+/** Returned instead of a raw error when Copilot is selected but its CLI isn't installed. */
+export const COPILOT_CLI_MISSING = "copilot-cli-missing";

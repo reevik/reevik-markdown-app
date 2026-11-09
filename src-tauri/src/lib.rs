@@ -18,17 +18,27 @@ pub struct VaultRef {
 pub struct AppState {
     pub vaults: Mutex<Vec<VaultRef>>,
     pub vaults_path: std::path::PathBuf,
-    /// Chosen AI model id; empty means "let the backend decide".
-    pub model: Mutex<String>,
+    /// The AI provider and the model chosen for each.
+    pub ai: Mutex<llm::AiSettings>,
     pub settings_path: std::path::PathBuf,
 }
 
-fn load_model(path: &std::path::Path) -> String {
-    std::fs::read_to_string(path)
+/// Reads the AI settings. Files written before providers existed hold a single
+/// `{"model": "..."}`, which was always a Claude model, so carry it over as one.
+fn load_ai_settings(path: &std::path::Path) -> llm::AiSettings {
+    let Some(v) = std::fs::read_to_string(path)
         .ok()
         .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-        .and_then(|v| v.get("model").and_then(|m| m.as_str()).map(str::to_string))
-        .unwrap_or_default()
+    else {
+        return llm::AiSettings::default();
+    };
+    if let Ok(settings) = serde_json::from_value::<llm::AiSettings>(v.clone()) {
+        return settings;
+    }
+    llm::AiSettings {
+        claude_model: v.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+        ..Default::default()
+    }
 }
 
 fn load_vaults(path: &std::path::Path) -> Vec<VaultRef> {
@@ -181,10 +191,17 @@ pub fn run() {
                 .item(&toolbar_item)
                 .build()?;
 
+            let ai_chat = MenuItem::with_id(
+                handle,
+                "ai.chat",
+                "Editorial",
+                true,
+                Some("CmdOrCtrl+Shift+E"),
+            )?;
             let ai_suggest = MenuItem::with_id(
                 handle,
                 "ai.suggest",
-                "Suggest Improvements",
+                "Analyze Document",
                 true,
                 Some("CmdOrCtrl+Shift+A"),
             )?;
@@ -203,6 +220,8 @@ pub fn run() {
                 Some("CmdOrCtrl+Shift+F"),
             )?;
             let ai_menu = SubmenuBuilder::new(handle, "AI")
+                .item(&ai_chat)
+                .separator()
                 .item(&ai_suggest)
                 .item(&ai_rephrase)
                 .separator()
@@ -279,14 +298,14 @@ pub fn run() {
             let vaults_path = config_dir.join("vaults.json");
             let vaults = load_vaults(&vaults_path);
             let settings_path = config_dir.join("settings.json");
-            let model = load_model(&settings_path);
-            // Apply the saved model before any AI call can be made.
-            llm::set_model_override(Some(model.clone()));
+            let ai = load_ai_settings(&settings_path);
+            // Apply the saved provider and models before any AI call can be made.
+            llm::apply_settings(&ai);
 
             app.manage(AppState {
                 vaults: Mutex::new(vaults),
                 vaults_path,
-                model: Mutex::new(model),
+                ai: Mutex::new(ai),
                 settings_path,
             });
 
@@ -317,11 +336,13 @@ pub fn run() {
             commands::is_llm_configured,
             commands::ai_backend,
             commands::set_llm_api_key,
-            commands::get_model,
+            commands::get_ai_settings,
+            commands::set_provider,
             commands::set_model,
             commands::suggest_improvements,
             commands::find_references,
             commands::rephrase,
+            commands::chat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

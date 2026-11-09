@@ -371,16 +371,43 @@ pub fn is_llm_configured() -> bool {
     llm::is_available()
 }
 
-/// Reports which AI backend is active: "cli", "api", or "none".
+/// Reports which AI backend is active: "cli", "api", "none", or
+/// "cli-logged-out" when the CLI is installed but has no usable login (and
+/// there is no API key to fall back to).
 #[tauri::command]
-pub fn ai_backend() -> String {
-    if llm::find_claude_cli().is_some() {
-        "cli".to_string()
-    } else if llm::get_api_key().is_some() {
-        "api".to_string()
-    } else {
-        "none".to_string()
+pub async fn ai_backend() -> String {
+    if llm::provider() == llm::Provider::Copilot {
+        return if llm::find_copilot_cli().is_some() { "copilot" } else { "copilot-missing" }.to_string();
     }
+    let has_key = llm::get_api_key().is_some();
+    if let Some(cli) = llm::find_claude_cli() {
+        return match llm::cli_logged_in(&cli).await {
+            Some(false) if has_key => "api",
+            Some(false) => "cli-logged-out",
+            // Logged in, or the CLI couldn't say: let the real call decide.
+            _ => "cli",
+        }
+        .to_string();
+    }
+    if has_key { "api" } else { "none" }.to_string()
+}
+
+/// The Copilot CLI, or the error the panel turns into an install hint.
+fn copilot_cli() -> Result<std::path::PathBuf, String> {
+    llm::find_copilot_cli().ok_or_else(|| llm::COPILOT_CLI_MISSING.to_string())
+}
+
+const NO_BACKEND: &str = "No AI backend available. Install the Claude CLI or add an API key in Settings.";
+
+/// The message for a failed CLI run. An expired or missing login is the usual
+/// cause, and the CLI doesn't say so in a form worth parsing, so ask it
+/// directly. `{:#}` keeps the whole context chain rather than its last link.
+async fn cli_failure(cli: &std::path::Path, what: &str, err: anyhow::Error) -> String {
+    eprintln!("claude CLI {what} failed: {err:#}");
+    if llm::cli_logged_in(cli).await == Some(false) {
+        return llm::CLI_NOT_LOGGED_IN.to_string();
+    }
+    format!("{err:#}")
 }
 
 #[tauri::command]
@@ -392,45 +419,80 @@ pub fn set_llm_api_key(key: String) -> Result<(), String> {
 /// falling back to the Anthropic HTTP API when a key is stored.
 #[tauri::command]
 pub async fn rephrase(text: String) -> Result<String, String> {
+    if llm::provider() == llm::Provider::Copilot {
+        let cli = copilot_cli()?;
+        return llm::rephrase_via_copilot(&cli, &text).await.map_err(|e| format!("{e:#}"));
+    }
+    let mut cli_err = None;
     if let Some(cli) = llm::find_claude_cli() {
         match llm::rephrase_via_cli(&cli, &text).await {
             Ok(out) => return Ok(out),
-            Err(err) => eprintln!("claude CLI rephrase failed: {err}"),
+            Err(err) => cli_err = Some(cli_failure(&cli, "rephrase", err).await),
         }
     }
     if let Some(api_key) = llm::get_api_key() {
         return llm::rephrase_via_api(&api_key, &text).await.map_err(|e| e.to_string());
     }
-    Err("No AI backend available. Install the Claude CLI or add an API key in Settings.".to_string())
+    Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
 }
 
-/// The AI model chosen in Settings; empty string means the backend's default.
+/// The AI provider and the model chosen for each (empty means the backend's
+/// own default).
 #[tauri::command]
-pub fn get_model(state: State<'_, AppState>) -> String {
-    state.model.lock().map(|m| m.clone()).unwrap_or_default()
+pub fn get_ai_settings(state: State<'_, AppState>) -> llm::AiSettings {
+    state.ai.lock().map(|a| a.clone()).unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn set_model(model: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_provider(provider: llm::Provider, state: State<'_, AppState>) -> Result<llm::AiSettings, String> {
+    update_ai_settings(&state, |a| a.provider = provider)
+}
+
+/// Sets the model for one provider. Each provider keeps its own, so switching
+/// back and forth doesn't lose the choice or send one provider another's id.
+#[tauri::command]
+pub fn set_model(provider: llm::Provider, model: String, state: State<'_, AppState>) -> Result<llm::AiSettings, String> {
     let model = model.trim().to_string();
-    if let Ok(mut m) = state.model.lock() {
-        *m = model.clone();
-    }
-    llm::set_model_override(Some(model.clone()));
+    update_ai_settings(&state, |a| match provider {
+        llm::Provider::Claude => a.claude_model = model,
+        llm::Provider::Copilot => a.copilot_model = model,
+    })
+}
+
+/// Applies a change to the AI settings in memory, in the LLM layer, and on disk.
+fn update_ai_settings(
+    state: &State<'_, AppState>,
+    change: impl FnOnce(&mut llm::AiSettings),
+) -> Result<llm::AiSettings, String> {
+    let updated = {
+        let mut ai = state.ai.lock().map_err(|e| e.to_string())?;
+        change(&mut ai);
+        ai.clone()
+    };
+    llm::apply_settings(&updated);
     if let Some(dir) = state.settings_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let body = serde_json::json!({ "model": model });
     std::fs::write(
         &state.settings_path,
-        serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?,
+        serde_json::to_string_pretty(&updated).map_err(|e| e.to_string())?,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(updated)
 }
 
 /// Research the note's topic and return real, web-searched sources.
 #[tauri::command]
 pub async fn find_references(text: String, app: tauri::AppHandle) -> Result<llm::ReferenceResult, String> {
+    if llm::provider() == llm::Provider::Copilot {
+        // Citations must come from real search results. Until it's confirmed
+        // the Copilot CLI can search the web, refuse rather than let it list
+        // sources from memory.
+        return Err("Reference search needs live web search, which isn't available through GitHub Copilot yet. \
+                    Switch the provider to Claude in Settings to search for references."
+            .to_string());
+    }
+    let mut cli_err = None;
     if let Some(cli) = llm::find_claude_cli() {
         let emit = |acc: &str, activity: &str| {
             let _ = app.emit(
@@ -440,7 +502,7 @@ pub async fn find_references(text: String, app: tauri::AppHandle) -> Result<llm:
         };
         match llm::find_references_via_cli_streamed(&cli, &text, emit).await {
             Ok(refs) => return Ok(refs),
-            Err(err) => eprintln!("claude CLI reference search failed: {err}"),
+            Err(err) => cli_err = Some(cli_failure(&cli, "reference search", err).await),
         }
     }
     if let Some(api_key) = llm::get_api_key() {
@@ -448,13 +510,21 @@ pub async fn find_references(text: String, app: tauri::AppHandle) -> Result<llm:
             .await
             .map_err(|e| e.to_string());
     }
-    Err("No AI backend available. Install the Claude CLI or add an API key in Settings.".to_string())
+    Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
 }
 
 /// Reviews the given note text, preferring the local `claude` CLI (no API key
 /// needed) and falling back to the Anthropic HTTP API when a key is stored.
 #[tauri::command]
 pub async fn suggest_improvements(text: String, app: tauri::AppHandle) -> Result<Review, String> {
+    if llm::provider() == llm::Provider::Copilot {
+        let cli = copilot_cli()?;
+        let emit = |acc: &str| {
+            let _ = app.emit("ai:review-progress", acc.to_string());
+        };
+        return llm::suggest_via_copilot(&cli, &text, emit).await.map_err(|e| format!("{e:#}"));
+    }
+    let mut cli_err = None;
     if let Some(cli) = llm::find_claude_cli() {
         // Stream partial output so the panel can show the score and suggestions
         // while the full rewrite is still being generated.
@@ -463,7 +533,7 @@ pub async fn suggest_improvements(text: String, app: tauri::AppHandle) -> Result
         };
         match llm::suggest_via_cli_streamed(&cli, &text, emit).await {
             Ok(review) => return Ok(review),
-            Err(err) => eprintln!("claude CLI review failed: {err}"),
+            Err(err) => cli_err = Some(cli_failure(&cli, "review", err).await),
         }
     }
     if let Some(api_key) = llm::get_api_key() {
@@ -471,5 +541,53 @@ pub async fn suggest_improvements(text: String, app: tauri::AppHandle) -> Result
             .await
             .map_err(|e| e.to_string());
     }
-    Err("No AI backend available. Install the Claude CLI or add an API key in Settings.".to_string())
+    Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
+}
+
+/// One turn of the editorial chat. `messages` is the whole transcript the panel
+/// is holding (the backend keeps no session of its own), and the open note is
+/// passed alongside it so each turn sees the document as it stands now.
+#[tauri::command]
+pub async fn chat(
+    messages: Vec<llm::ChatMessage>,
+    note_path: Option<String>,
+    note_text: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    if messages.is_empty() {
+        return Err("Nothing to send.".to_string());
+    }
+    if llm::provider() == llm::Provider::Copilot {
+        let cli = copilot_cli()?;
+        let emit = |acc: &str| {
+            let _ = app.emit("ai:chat-progress", acc.to_string());
+        };
+        return llm::chat_via_copilot(&cli, &messages, note_path.as_deref(), note_text.as_deref(), emit)
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
+    let mut cli_err = None;
+    if let Some(cli) = llm::find_claude_cli() {
+        let emit = |acc: &str| {
+            let _ = app.emit("ai:chat-progress", acc.to_string());
+        };
+        match llm::chat_via_cli_streamed(
+            &cli,
+            &messages,
+            note_path.as_deref(),
+            note_text.as_deref(),
+            emit,
+        )
+        .await
+        {
+            Ok(reply) => return Ok(reply),
+            Err(err) => cli_err = Some(cli_failure(&cli, "chat", err).await),
+        }
+    }
+    if let Some(api_key) = llm::get_api_key() {
+        return llm::chat_via_api(&api_key, &messages, note_path.as_deref(), note_text.as_deref())
+            .await
+            .map_err(|e| e.to_string());
+    }
+    Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
 }

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { aiBackend, getModel, MODEL_OPTIONS, setLlmApiKey, setModel } from "../lib/api";
+import CliLoginHint from "./CliLoginHint";
+import { aiBackend, getAiSettings, MODEL_OPTIONS, PROVIDERS, setLlmApiKey, setModel, setProvider } from "../lib/api";
+import type { AiProvider, AiSettings } from "../lib/types";
 import {
   applyEditorFont,
   FONT_OPTIONS,
@@ -29,12 +31,18 @@ export default function SettingsModal({ onClose }: Props) {
   };
 
   const { data: backend } = useQuery({ queryKey: ["ai-backend"], queryFn: aiBackend });
-  const { data: model } = useQuery({ queryKey: ["ai-model"], queryFn: getModel });
+  const { data: ai } = useQuery({ queryKey: ["ai-settings"], queryFn: getAiSettings });
+  const provider: AiProvider = ai?.provider ?? "claude";
+  const model = ai ? (provider === "claude" ? ai.claude_model : ai.copilot_model) : "";
 
-  const saveModel = useMutation({
-    mutationFn: (id: string) => setModel(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-model"] }),
-  });
+  // Both return the saved settings; seed the cache with them rather than
+  // waiting on a refetch, then re-ask which backend now answers.
+  const onSaved = (next: AiSettings) => {
+    qc.setQueryData(["ai-settings"], next);
+    qc.invalidateQueries({ queryKey: ["ai-backend"] });
+  };
+  const saveProvider = useMutation({ mutationFn: (p: AiProvider) => setProvider(p), onSuccess: onSaved });
+  const saveModel = useMutation({ mutationFn: (id: string) => setModel(provider, id), onSuccess: onSaved });
 
   const saveKey = useMutation({
     mutationFn: (key: string) => setLlmApiKey(key),
@@ -109,9 +117,36 @@ export default function SettingsModal({ onClose }: Props) {
 
         <section className="card mt-4 p-5">
           <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">AI agent</h3>
-          <div className="mt-2 flex items-start gap-2.5">
+
+          <div className="mt-3">
+            <label className="text-[12px] font-medium text-[var(--text-secondary)]">Provider</label>
+            <div className="mt-1.5 flex gap-0.5 rounded-lg bg-black/[0.06] p-0.5">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => provider !== p.id && saveProvider.mutate(p.id)}
+                  disabled={saveProvider.isPending}
+                  className={`flex-1 rounded-[6px] px-2 py-1 text-[12px] transition-colors ${
+                    provider === p.id
+                      ? "bg-white/80 font-medium text-[var(--text-primary)] shadow-sm"
+                      : "text-[var(--text-secondary)] hover:bg-white/40"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-start gap-2.5">
             <span
-              className={`mt-1 h-2 w-2 shrink-0 rounded-full ${backend === "none" ? "bg-red-400" : "bg-green-400"}`}
+              className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
+                backend === "none" || backend === "copilot-missing"
+                  ? "bg-red-400"
+                  : backend === "cli-logged-out"
+                    ? "bg-yellow-400"
+                    : "bg-green-400"
+              }`}
             />
             <p className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
               {backend === "cli" && (
@@ -133,13 +168,34 @@ export default function SettingsModal({ onClose }: Props) {
                   Claude CLI, or add an Anthropic API key below.
                 </>
               )}
+              {backend === "cli-logged-out" && (
+                <>
+                  <span className="font-medium text-[var(--text-primary)]">Claude CLI found, but not logged in.</span>{" "}
+                  Sign in to use it, or add an Anthropic API key below.
+                </>
+              )}
+              {backend === "copilot" && (
+                <>
+                  <span className="font-medium text-[var(--text-primary)]">GitHub Copilot CLI detected.</span> Requests
+                  run through <code className="rounded bg-black/10 px-1.5 py-0.5">copilot</code> on your machine, billed
+                  to your Copilot plan. Reference search stays with Claude.
+                </>
+              )}
+              {backend === "copilot-missing" && (
+                <>
+                  <span className="font-medium text-[var(--text-primary)]">GitHub Copilot CLI not found.</span> Install
+                  it with <code className="rounded bg-black/10 px-1.5 py-0.5">npm install -g @github/copilot</code>, then
+                  run <code className="rounded bg-black/10 px-1.5 py-0.5">copilot login</code>.
+                </>
+              )}
             </p>
           </div>
+          {backend === "cli-logged-out" && <CliLoginHint className="mt-3" />}
 
           <div className="mt-4">
             <label className="text-[12px] font-medium text-[var(--text-secondary)]">Model</label>
             <div className="mt-1.5 flex flex-col gap-1">
-              {MODEL_OPTIONS.map((m) => {
+              {MODEL_OPTIONS[provider].map((m) => {
                 const active = (model ?? "") === m.id;
                 return (
                   <button
@@ -170,41 +226,47 @@ export default function SettingsModal({ onClose }: Props) {
               })}
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-              Applies to editorial reviews, rephrasing and reference search. Haiku is markedly faster
-              for reviews; reference search benefits from a stronger model.
+              {provider === "claude"
+                ? "Applies to the Editorial chat, document analysis, rephrasing and reference search. Haiku is markedly faster for reviews; reference search benefits from a stronger model."
+                : "Applies to the Editorial chat, document analysis and rephrasing. More Copilot models will be listed once they're confirmed against the installed CLI."}
             </p>
           </div>
 
-          <div className="mt-4 flex items-center gap-2">
-            <label className="text-[12px] font-medium text-[var(--text-secondary)]">API key</label>
-            {backend === "api" && (
-              <span className="rounded-md bg-green-400/15 px-2 py-0.5 text-[11px] font-medium text-green-700">
-                configured
-              </span>
-            )}
-            {backend === "cli" && (
-              <span className="text-[11px] text-[var(--text-tertiary)]">optional — CLI is active</span>
-            )}
-          </div>
-          <div className="mt-1.5 flex gap-2">
-            <input
-              type="password"
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              placeholder="sk-ant-…"
-              className="field flex-1 px-2.5 py-1.5 text-[13px]"
-            />
-            <button
-              onClick={() => saveKey.mutate(apiKeyInput)}
-              disabled={!apiKeyInput || saveKey.isPending}
-              className="btn-accent px-3.5 py-1.5 text-[13px]"
-            >
-              {saveKey.isSuccess ? "Saved ✓" : "Save"}
-            </button>
-          </div>
-          <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-            The key is stored in the macOS Keychain, never in the vault or app files.
-          </p>
+          {/* An Anthropic key only matters to the Claude provider. */}
+          {provider === "claude" && (
+            <>
+            <div className="mt-4 flex items-center gap-2">
+              <label className="text-[12px] font-medium text-[var(--text-secondary)]">API key</label>
+              {backend === "api" && (
+                <span className="rounded-md bg-green-400/15 px-2 py-0.5 text-[11px] font-medium text-green-700">
+                  configured
+                </span>
+              )}
+              {backend === "cli" && (
+                <span className="text-[11px] text-[var(--text-tertiary)]">optional — CLI is active</span>
+              )}
+            </div>
+            <div className="mt-1.5 flex gap-2">
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder="sk-ant-…"
+                className="field flex-1 px-2.5 py-1.5 text-[13px]"
+              />
+              <button
+                onClick={() => saveKey.mutate(apiKeyInput)}
+                disabled={!apiKeyInput || saveKey.isPending}
+                className="btn-accent px-3.5 py-1.5 text-[13px]"
+              >
+                {saveKey.isSuccess ? "Saved ✓" : "Save"}
+              </button>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+              The key is stored in the macOS Keychain, never in the vault or app files.
+            </p>
+            </>
+          )}
         </section>
       </div>
     </div>
