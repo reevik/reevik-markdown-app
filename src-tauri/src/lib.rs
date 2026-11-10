@@ -1,9 +1,10 @@
 mod commands;
 mod fs_vault;
 mod llm;
+mod reorganize;
 
 use std::sync::Mutex;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
 /// The version as shown to people (About page, README badge). The manifests
@@ -107,9 +108,13 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+I"),
             )?;
+            // Labels for the open note (its frontmatter `tags:`).
+            let labels = MenuItem::with_id(handle, "file.labels", "Labels…", true, None::<&str>)?;
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_note)
                 .item(&new_folder)
+                .separator()
+                .item(&labels)
                 .separator()
                 .item(&add_to_vault)
                 .separator()
@@ -195,6 +200,20 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+R"),
             )?;
+            let ai_diacritics = MenuItem::with_id(
+                handle,
+                "ai.diacritics",
+                "Restore Diacritics",
+                true,
+                Some("CmdOrCtrl+Shift+D"),
+            )?;
+            let ai_translate = MenuItem::with_id(
+                handle,
+                "ai.translate",
+                "Translate…",
+                true,
+                Some("CmdOrCtrl+Shift+T"),
+            )?;
             let ai_references = MenuItem::with_id(
                 handle,
                 "ai.references",
@@ -207,6 +226,8 @@ pub fn run() {
                 .separator()
                 .item(&ai_suggest)
                 .item(&ai_rephrase)
+                .item(&ai_diacritics)
+                .item(&ai_translate)
                 .separator()
                 .item(&ai_references)
                 .build()?;
@@ -218,7 +239,16 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+O"),
             )?;
-            let vault_menu = SubmenuBuilder::new(handle, "Vault").item(&open_vault).build()?;
+            // Vault-wide AI actions, matching the sidebar's broom and grid buttons.
+            let tame = MenuItem::with_id(handle, "vault.tame", "Clean Up Vault…", true, None::<&str>)?;
+            let reorganize =
+                MenuItem::with_id(handle, "vault.reorganize", "Reorganize Vault…", true, None::<&str>)?;
+            let vault_menu = SubmenuBuilder::new(handle, "Vault")
+                .item(&open_vault)
+                .separator()
+                .item(&tame)
+                .item(&reorganize)
+                .build()?;
 
             let close_window = MenuItem::with_id(
                 handle,
@@ -327,6 +357,15 @@ pub fn run() {
             commands::rephrase,
             commands::chat,
             commands::app_version,
+            commands::note_signatures,
+            commands::rate_notes,
+            commands::propose_reorganization,
+            commands::apply_reorganization,
+            commands::read_frontmatters,
+            commands::read_label_colors,
+            commands::write_label_colors,
+            commands::restore_diacritics,
+            commands::translate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

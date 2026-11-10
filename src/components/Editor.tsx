@@ -40,7 +40,11 @@ export interface EditorApi {
   applyEdit(spec: EditSpec): void;
   /** See `EditorHandle.applyAgentEdits`; null when no note is in the editor. */
   applyAgentEdits(edits: AgentEdit[]): { applied: number; failed: string[] } | null;
+  /** See `EditorHandle.replaceText`; false when no note is in the editor. */
+  replaceText(next: string): boolean;
   rephrase(): void;
+  restoreDiacritics(): void;
+  translate(): void;
 }
 
 const Editor = forwardRef<EditorApi, Props>(function Editor(
@@ -69,7 +73,14 @@ const Editor = forwardRef<EditorApi, Props>(function Editor(
     () => ({
       applyEdit: (spec) => editorRef.current?.applyEdit(spec),
       applyAgentEdits: (edits) => editorRef.current?.applyAgentEdits(edits) ?? null,
+      replaceText: (next) => {
+        if (!editorRef.current) return false;
+        editorRef.current.replaceText(next);
+        return true;
+      },
       rephrase: () => editorRef.current?.rephrase(),
+      restoreDiacritics: () => editorRef.current?.restoreDiacritics(),
+      translate: () => editorRef.current?.translate(),
     }),
     [],
   );

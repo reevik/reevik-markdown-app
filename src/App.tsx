@@ -12,9 +12,11 @@ import AboutModal from "./components/AboutModal";
 import { readNote, setToolbarChecked, writeNote } from "./lib/api";
 import { notifyVaultChanged } from "./lib/contentIndex";
 import { printNote } from "./lib/exportPdf";
-import { applyEditorFont, loadEditorFont } from "./lib/editorFont";
+import { applyEditorFont, applyPanelFont, loadEditorFont, loadPanelFont } from "./lib/editorFont";
 import type { Vault } from "./lib/types";
 import { applyChanges, resolveEdits, type AgentEdit, type EditOutcome } from "./lib/agentEdits";
+import { forgetRating } from "./lib/vaultTamer";
+import { frontmatter, noteTextChanged, setTags } from "./lib/labels";
 import "./App.css";
 
 const LEFT_DEFAULT = 256;
@@ -37,6 +39,12 @@ export interface OpenDoc {
   saveState: SaveState;
   loading: boolean;
   rev: number;
+}
+
+/** A note's text below its frontmatter. */
+function bodyOf(text: string): string {
+  const fm = frontmatter(text);
+  return fm ? text.slice(fm.end) : text;
 }
 
 function basename(path: string): string {
@@ -70,10 +78,12 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Editor typography, applied as CSS variables before the first paint.
+  // Editor and AI-panel typography, applied as CSS variables before the first paint.
   useEffect(() => {
     const { family, size } = loadEditorFont();
     applyEditorFont(family, size);
+    const panel = loadPanelFont();
+    applyPanelFont(panel.family, panel.size);
   }, []);
 
   // Panel layout (persisted): widths + collapsed state for the side panels.
@@ -114,7 +124,13 @@ function App() {
   // Update a note's buffer and debounce a write to disk.
   const scheduleSave = useCallback(
     (path: string, next: string) => {
+      const prev = docsRef.current.find((d) => d.path === path)?.content;
       patchDoc(path, { content: next, saveState: "dirty" });
+      // Its completeness rating described the old text — but a label change
+      // only touches the frontmatter, and doesn't make a note more complete.
+      if (prev === undefined || bodyOf(prev) !== bodyOf(next)) forgetRating(path);
+      // Labels can be typed into the frontmatter by hand, too.
+      noteTextChanged(path, next);
       const timers = saveTimers.current;
       const existing = timers.get(path);
       if (existing) clearTimeout(existing);
@@ -301,6 +317,74 @@ function App() {
     [setDocs, removeTab],
   );
 
+  // Set a note's labels (frontmatter `tags:`). An open note changes through
+  // the editor or its buffer, so autosave can't write an older copy over it;
+  // a closed one is changed on disk.
+  const setNoteLabels = useCallback(
+    async (path: string, labels: string[]) => {
+      const doc = docsRef.current.find((d) => d.path === path && !d.loading);
+      if (doc) {
+        const next = setTags(doc.content, labels);
+        if (next === doc.content) return;
+        // In the editor: one ⌘Z-able change, saved via onChange like typing.
+        if (path === activePathRef.current && editorApi.current?.replaceText(next)) return;
+        scheduleSave(path, next);
+        return;
+      }
+      const text = await readNote(path);
+      const next = setTags(text, labels);
+      if (next === text) return;
+      await writeNote(path, next);
+      noteTextChanged(path, next);
+    },
+    [scheduleSave],
+  );
+
+  // Run an action the sidebar owns (clean up, reorganize, labels) from the menu
+  // or palette. The sidebar is unmounted while collapsed, so show it and let it
+  // register its listeners before asking.
+  const sidebarAction = useCallback((event: string) => {
+    setLeftCollapsed(false);
+    setTimeout(() => window.dispatchEvent(new Event(event)), 60);
+  }, []);
+
+  // Before a bulk move (reorganizing the vault): write every unsaved edit now.
+  // The move rewrites links on disk; a buffer saved afterwards would put the
+  // old links back.
+  const flushAllSaves = useCallback(async () => {
+    saveTimers.current.forEach((t) => clearTimeout(t));
+    saveTimers.current.clear();
+    for (const d of docsRef.current) {
+      if (d.loading || d.saveState === "saved") continue;
+      await writeNote(d.path, d.content);
+      patchDoc(d.path, { saveState: "saved" });
+    }
+  }, [patchDoc]);
+
+  // After a bulk move: open tabs follow their notes, and any open note whose
+  // links were rewritten on disk is reloaded (remounting the editor).
+  const afterBulkMove = useCallback(
+    async (moves: { from: string; to: string }[]) => {
+      const remap = new Map(moves.map((m) => [m.from, m.to]));
+      const next = docsRef.current.map((d) => {
+        const to = remap.get(d.path);
+        return to ? { ...d, path: to, name: basename(to) } : d;
+      });
+      setDocs(() => next);
+      setActivePath((cur) => (cur && remap.has(cur) ? remap.get(cur)! : cur));
+      for (const d of next) {
+        if (d.loading) continue;
+        try {
+          const text = await readNote(d.path);
+          if (text !== d.content) patchDoc(d.path, { content: text, rev: d.rev + 1, saveState: "saved" });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    },
+    [setDocs, patchDoc],
+  );
+
   // Enter a vault (or return to the chooser with `null`). Flushes unsaved buffers
   // and closes every tab so nothing carries across vaults.
   const switchVault = useCallback(
@@ -346,6 +430,14 @@ function App() {
         title: "Add to vault…",
         hint: "⌘⇧I",
         run: () => window.dispatchEvent(new Event("reevik:add-to-vault")),
+      },
+      {
+        id: "file.labels",
+        group: "File",
+        title: "Labels…",
+        disabled: !hasNote,
+        disabledReason: noNote,
+        run: () => sidebarAction("reevik:edit-labels"),
       },
       {
         id: "file.export-pdf",
@@ -397,6 +489,24 @@ function App() {
         run: () => editorApi.current?.rephrase(),
       },
       {
+        id: "ai.diacritics",
+        group: "AI",
+        title: "Restore diacritics",
+        hint: "⌘⇧D",
+        disabled: !hasNote,
+        disabledReason: noNote,
+        run: () => editorApi.current?.restoreDiacritics(),
+      },
+      {
+        id: "ai.translate",
+        group: "AI",
+        title: "Translate selection…",
+        hint: "⌘⇧T",
+        disabled: !hasNote,
+        disabledReason: noNote,
+        run: () => editorApi.current?.translate(),
+      },
+      {
         id: "ai.chat",
         group: "AI",
         title: "Editorial",
@@ -435,6 +545,8 @@ function App() {
         },
       },
       { id: "vault.open", group: "Vault", title: "Open vault…", hint: "⌘⇧O", run: () => switchVault(null) },
+      { id: "vault.tame", group: "Vault", title: "Clean up vault…", run: () => sidebarAction("reevik:tame") },
+      { id: "vault.reorganize", group: "Vault", title: "Reorganize vault…", run: () => sidebarAction("reevik:reorganize") },
       { id: "vault.settings", group: "Vault", title: "Preferences…", hint: "⌘,", run: () => setShowSettings(true) },
       { id: "app.about", group: "Vault", title: "About Reevik", run: () => setShowAbout(true) },
       // Reachable from the menu/⌘K; hidden from the palette's own list.
@@ -452,7 +564,7 @@ function App() {
       });
     }
     return list;
-  }, [activePath, mode, showToolbar, leftCollapsed, rightCollapsed, exportPdf, toggleToolbar, switchVault, closeTab]);
+  }, [activePath, mode, showToolbar, leftCollapsed, rightCollapsed, exportPdf, toggleToolbar, switchVault, closeTab, sidebarAction]);
 
   // Native menu picks arrive as palette command ids, so a menu item and a palette
   // entry run exactly the same action.
@@ -508,6 +620,9 @@ function App() {
             selectedPath={activePath}
             onOpenNote={openNote}
             onPathChanged={onPathChanged}
+            onBeforeBulkMove={flushAllSaves}
+            onAfterBulkMove={afterBulkMove}
+            onSetLabels={setNoteLabels}
           />
           <Resizer width={leftWidth} setWidth={setLeftWidth} dir={1} min={180} max={480}
                    onReset={() => setLeftWidth(LEFT_DEFAULT)} />

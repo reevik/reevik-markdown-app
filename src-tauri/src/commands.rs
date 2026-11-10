@@ -602,3 +602,280 @@ pub async fn chat(
 pub fn app_version() -> &'static str {
     crate::DISPLAY_VERSION
 }
+
+// --- Taming the vault ----------------------------------------------------------
+
+/// A note's signature: size and modification time. A rating is reused until
+/// this changes, so re-running only spends AI calls on notes that were edited.
+#[derive(serde::Serialize)]
+pub struct NoteSignature {
+    pub path: String,
+    pub sig: String,
+}
+
+fn signature(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+    Some(format!("{}:{modified}", meta.len()))
+}
+
+#[tauri::command]
+pub fn note_signatures(paths: Vec<String>, state: State<'_, AppState>) -> Vec<NoteSignature> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let p = PathBuf::from(&path);
+            ensure_within_vaults(&p, &state).ok()?;
+            Some(NoteSignature { sig: signature(&p)?, path })
+        })
+        .collect()
+}
+
+/// A note's completeness rating, as stored by the panel.
+#[derive(serde::Serialize)]
+pub struct RatedNote {
+    pub path: String,
+    pub score: u8,
+    /// "keep" | "unfinished" | "stub" (probably safe to delete).
+    pub verdict: String,
+    pub reason: String,
+    pub sig: String,
+}
+
+/// The note's text with any YAML frontmatter removed: a note that is only
+/// frontmatter is an empty template, whatever its fields say.
+fn body_of(text: &str) -> &str {
+    if let Some(rest) = text.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---") {
+            return rest[end + 4..].trim_start_matches('\n');
+        }
+    }
+    text
+}
+
+fn word_count(text: &str) -> usize {
+    text.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
+}
+
+/// Rates one batch of notes for completeness. The panel sends a handful at a
+/// time; notes with no content to speak of are rated here without asking the
+/// AI at all.
+#[tauri::command]
+pub async fn rate_notes(paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<RatedNote>, String> {
+    let mut out = Vec::new();
+    let mut to_ask: Vec<(usize, String, usize, String)> = Vec::new();
+    let mut pending: Vec<(String, String)> = Vec::new(); // (path, sig), indexed by id - 1
+
+    for path in paths {
+        let p = PathBuf::from(&path);
+        if ensure_within_vaults(&p, &state).is_err() {
+            continue;
+        }
+        let (Ok(text), Some(sig)) = (std::fs::read_to_string(&p), signature(&p)) else {
+            continue;
+        };
+        let body = body_of(&text);
+        let words = word_count(body);
+        if words <= 3 {
+            let has_title = body.lines().any(|l| l.trim_start().starts_with('#'));
+            out.push(RatedNote {
+                path,
+                score: 0,
+                verdict: "stub".to_string(),
+                reason: if has_title { "Empty apart from its title." } else { "Empty." }.to_string(),
+                sig,
+            });
+            continue;
+        }
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        pending.push((path, sig));
+        to_ask.push((pending.len(), name, words, body.to_string()));
+    }
+
+    if !to_ask.is_empty() {
+        let reply = complete(llm::RATE_SYSTEM, &llm::rate_user_prompt(&to_ask), 4096).await?;
+        let ratings = llm::parse_ratings(&reply).map_err(|e| format!("{e:#}"))?;
+        for r in ratings {
+            let Some((path, sig)) = pending.get(r.id.wrapping_sub(1)) else { continue };
+            out.push(RatedNote {
+                path: path.clone(),
+                score: r.score,
+                verdict: r.verdict,
+                reason: r.reason,
+                sig: sig.clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// One prompt through whichever backend is active, as plain text.
+async fn complete(system: &str, user: &str, max_tokens: u32) -> Result<String, String> {
+    if llm::provider() == llm::Provider::Copilot {
+        let cli = copilot_cli()?;
+        return llm::copilot_run(&cli, &format!("{system}\n\n---\n\n{user}"), 300, |_| {})
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
+    let mut cli_err = None;
+    if let Some(cli) = llm::find_claude_cli() {
+        match llm::complete_via_cli(&cli, &format!("{system}\n\n---\n\n{user}"), 300).await {
+            Ok(reply) => return Ok(reply),
+            Err(err) => cli_err = Some(cli_failure(&cli, "rating", err).await),
+        }
+    }
+    if let Some(api_key) = llm::get_api_key() {
+        return llm::complete_via_api(&api_key, system, user, max_tokens)
+            .await
+            .map_err(|e| format!("{e:#}"));
+    }
+    Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
+}
+
+// --- Reorganize the vault ------------------------------------------------------
+
+/// The registered vault `vault` names, canonicalized; anything else is refused.
+fn vault_root(vault: &str, state: &AppState) -> Result<PathBuf, String> {
+    let root = PathBuf::from(vault);
+    let known = state.vaults.lock().unwrap().iter().any(|v| Path::new(&v.path) == root);
+    if !known {
+        return Err("that folder isn't a registered vault".to_string());
+    }
+    ensure_within_vaults(&root, state)?;
+    Ok(root)
+}
+
+/// Asks the AI for a folder per note. Read-only: nothing moves until the
+/// author approves the proposal and the panel calls `apply_reorganization`.
+#[tauri::command]
+pub async fn propose_reorganization(
+    vault: String,
+    state: State<'_, AppState>,
+) -> Result<crate::reorganize::Proposal, String> {
+    let root = vault_root(&vault, &state)?;
+    let notes = crate::reorganize::walk_notes(&root);
+    if notes.is_empty() {
+        return Err("This vault has no notes to organize.".to_string());
+    }
+    let prompt = crate::reorganize::user_prompt(&root, &notes);
+    // A move per note; leave room for large vaults.
+    let reply = complete(crate::reorganize::SYSTEM, &prompt, 32_000).await?;
+    crate::reorganize::build_proposal(&root, &notes, &reply).map_err(|e| format!("{e:#}"))
+}
+
+/// Applies approved moves, rewriting links so images and note links keep
+/// working. Also used, with the moves reversed, to undo.
+#[tauri::command]
+pub fn apply_reorganization(
+    vault: String,
+    moves: Vec<crate::reorganize::Move>,
+    state: State<'_, AppState>,
+) -> Result<crate::reorganize::ApplyReport, String> {
+    let root = vault_root(&vault, &state)?;
+    let pairs: Vec<(PathBuf, PathBuf)> = moves
+        .into_iter()
+        .map(|m| (PathBuf::from(m.from), PathBuf::from(m.to)))
+        .collect();
+    for (from, to) in &pairs {
+        ensure_within_vaults(from, &state)?;
+        ensure_within_vaults(to, &state)?;
+    }
+    let report = crate::reorganize::apply(&root, &pairs).map_err(|e| format!("{e:#}"))?;
+    Ok(report)
+}
+
+// --- Labels ----------------------------------------------------------------------
+
+/// The frontmatter of every note that has one, keyed by path — the frontend
+/// parses the labels out of it, so there is a single parser. Same rule as the
+/// editor: first line `---`, ending at the next `---` line.
+#[tauri::command]
+pub fn read_frontmatters(
+    vault: String,
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::io::{BufRead, BufReader};
+    let root = vault_root(&vault, &state)?;
+    let mut out = std::collections::HashMap::new();
+    for note in crate::reorganize::walk_notes(&root) {
+        let Ok(file) = std::fs::File::open(&note) else { continue };
+        let mut lines = BufReader::new(file).lines().map_while(Result::ok);
+        if lines.next().is_none_or(|l| l.trim() != "---") {
+            continue;
+        }
+        let mut body = Vec::new();
+        // Frontmatter is short; don't read a whole note hunting for a fence.
+        for line in lines.take(200) {
+            if line.trim() == "---" {
+                out.insert(note.to_string_lossy().into_owned(), body.join("\n"));
+                break;
+            }
+            body.push(line);
+        }
+    }
+    Ok(out)
+}
+
+fn label_colors_path(root: &Path) -> PathBuf {
+    root.join(".reevik").join("labels.json")
+}
+
+/// Label colours for this vault, kept in `.reevik/labels.json` so they sync
+/// with it; Obsidian ignores dot-folders.
+#[tauri::command]
+pub fn read_label_colors(
+    vault: String,
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let root = vault_root(&vault, &state)?;
+    let Ok(text) = std::fs::read_to_string(label_colors_path(&root)) else {
+        return Ok(Default::default());
+    };
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(v.get("colors")
+        .and_then(|c| serde_json::from_value(c.clone()).ok())
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn write_label_colors(
+    vault: String,
+    colors: std::collections::HashMap<String, String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let root = vault_root(&vault, &state)?;
+    let path = label_colors_path(&root);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let body = serde_json::json!({ "colors": colors });
+    std::fs::write(&path, serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+/// Puts missing accents back into a selection (⌘⇧D). The editor checks the
+/// reply changed nothing but accents before applying it.
+#[tauri::command]
+pub async fn restore_diacritics(text: String) -> Result<String, String> {
+    // Truncating would silently drop the end of the selection, so refuse instead.
+    if text.chars().count() > 40_000 {
+        return Err("The selection is too long — restore accents a section at a time.".to_string());
+    }
+    complete(llm::DIACRITICS_PROMPT, &format!("Text:\n{text}"), 16_000).await
+}
+
+/// Translates a selection into `language` (⌘⇧T).
+#[tauri::command]
+pub async fn translate(text: String, language: String) -> Result<String, String> {
+    let language = language.trim();
+    if language.is_empty() {
+        return Err("No target language.".to_string());
+    }
+    if text.chars().count() > 40_000 {
+        return Err("The selection is too long — translate a section at a time.".to_string());
+    }
+    complete(llm::TRANSLATE_PROMPT, &format!("Target language: {language}\n\nText:\n{text}"), 16_000).await
+}

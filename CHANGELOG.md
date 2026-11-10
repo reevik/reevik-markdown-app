@@ -4,6 +4,48 @@ All notable changes to Reevik are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0.beta] — unreleased
+
+### Added
+
+- **Clean up the vault** — the broom button (or **Vault ▸ Clean Up Vault…**)
+  rates every note for completeness in the background and marks the ones that
+  look safe to delete. **Show them** narrows the tree to just those. It asks
+  before sending anything, flags empty notes without asking the AI at all, and
+  on later runs only rates notes that changed.
+- **Reorganize the vault** — the grid button (or **Vault ▸ Reorganize
+  Vault…**) proposes a folder for every note and shows the structure before and
+  after; untick any note to keep it where it is. Approved moves keep every
+  image and note link working, folders left empty are removed, and **Undo**
+  puts everything back.
+- **Labels** — coloured labels on notes, stored as the note's frontmatter
+  `tags:` so they travel with it and show up in Obsidian too. Assign them from a
+  note's tag button, by right-clicking it, or with **File ▸ Labels…**; filter
+  the tree with the label chips under the search box.
+- **Select several notes** — shift-click for a range, `⌘`-click to add or
+  remove one. Label them together, drag them onto a folder, or delete them.
+- **Restore diacritics** (`⌘⇧D`) — puts the accents back into text typed
+  without them, in any language. It only ever adds accents: a result that
+  changes anything else is not applied.
+- **Translate** (`⌘⇧T`) — translates the selection into a language picked from a
+  list, with your recent choices first. Markdown, code, URLs and names are kept.
+- **Fonts for the AI panels** — Settings ▸ Fonts now sets the font and size of
+  the Editorial, Analyze and References panels as well as the editor's.
+- A short explanation of what **Analyze** and **References** do, above their
+  buttons.
+
+### Changed
+
+- **Settings is a tabbed window** — Fonts and AI — on a solid background.
+- The checklist shortcut moved from `⌘⇧T` to `⌘⇧U`, as `⌘⇧T` is now Translate.
+
+### Fixed
+
+- Shift-clicking in the file tree selected the file names as text.
+- **Rephrase failed silently** — with a logged-out Claude CLI it did nothing and
+  showed nothing. Failures now appear as a short message at the selection, and
+  spaces around the selection are kept.
+
 ## [1.3.0.beta] — 2026-11-10
 
 ### Changed

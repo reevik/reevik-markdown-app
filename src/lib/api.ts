@@ -245,3 +245,89 @@ export const COPILOT_CLI_MISSING = "copilot-cli-missing";
 export function appVersion(): Promise<string> {
   return invoke("app_version");
 }
+
+// --- Taming the vault ---
+
+export interface NoteSignature {
+  path: string;
+  /** Size and modified time; a rating is reused until this changes. */
+  sig: string;
+}
+
+export type Verdict = "keep" | "unfinished" | "stub";
+
+export interface RatedNote {
+  path: string;
+  score: number;
+  /** `stub`: barely started, probably safe to delete. */
+  verdict: Verdict;
+  reason: string;
+  sig: string;
+}
+
+export function noteSignatures(paths: string[]): Promise<NoteSignature[]> {
+  return invoke("note_signatures", { paths });
+}
+
+/** Rates a small batch of notes for completeness (the caller batches). */
+export function rateNotes(paths: string[]): Promise<RatedNote[]> {
+  return invoke("rate_notes", { paths });
+}
+
+// --- Reorganize the vault ---
+
+export interface Move {
+  from: string;
+  to: string;
+}
+
+export interface ReorgProposal {
+  /** Every note now, relative to the vault. */
+  notes: string[];
+  folders: { path: string; purpose: string }[];
+  /** Only the notes that change location, as absolute paths. */
+  moves: Move[];
+}
+
+export interface ReorgReport {
+  moved: number;
+  /** Notes whose links were rewritten to follow the moves. */
+  relinked: number;
+  removed_folders: number;
+}
+
+/** Ask the AI for a folder per note. Read-only. */
+export function proposeReorganization(vault: string): Promise<ReorgProposal> {
+  return invoke("propose_reorganization", { vault });
+}
+
+/** Move notes, keeping their links working. Reverse the moves to undo. */
+export function applyReorganization(vault: string, moves: Move[]): Promise<ReorgReport> {
+  return invoke("apply_reorganization", { vault, moves });
+}
+
+// --- Labels ---
+
+/** The frontmatter (between the `---` fences) of every note that has one. */
+export function readFrontmatters(vault: string): Promise<Record<string, string>> {
+  return invoke("read_frontmatters", { vault });
+}
+
+/** Label colours chosen for this vault, from `.reevik/labels.json`. */
+export function readLabelColors(vault: string): Promise<Record<string, string>> {
+  return invoke("read_label_colors", { vault });
+}
+
+export function writeLabelColors(vault: string, colors: Record<string, string>): Promise<void> {
+  return invoke("write_label_colors", { vault, colors });
+}
+
+/** Put missing accents back into `text` (⌘⇧D). */
+export function restoreDiacritics(text: string): Promise<string> {
+  return invoke("restore_diacritics", { text });
+}
+
+/** Translate `text` into `language` (⌘⇧T). */
+export function translate(text: string, language: string): Promise<string> {
+  return invoke("translate", { text, language });
+}

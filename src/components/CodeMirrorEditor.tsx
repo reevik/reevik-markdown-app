@@ -19,7 +19,18 @@ import { tags as t } from "@lezer/highlight";
 import { readImageDataUrl, saveAttachment } from "../lib/api";
 import { loadContentIndex, subscribeVaultChanges } from "../lib/contentIndex";
 import type { ContentIndexEntry } from "../lib/types";
-import { agentField, collabDecorations, collabKeymap, rephraseSelection } from "./collab";
+import {
+  agentField,
+  collabDecorations,
+  collabKeymap,
+  rephraseSelection,
+  requestTranslate,
+  restoreDiacriticsSelection,
+  TRANSLATE_REQUEST,
+  translateRange,
+} from "./collab";
+import LanguagePicker from "./LanguagePicker";
+import { rememberLanguage } from "../lib/languages";
 import { resolveEdits, type AgentEdit } from "../lib/agentEdits";
 import { INSERT_ACTIONS } from "./InsertToolbar";
 import type { VisualizationSpec } from "vega-embed";
@@ -53,8 +64,15 @@ export interface EditorHandle {
    * placed against the text as it is now, not as it was when the agent read it.
    */
   applyAgentEdits(edits: AgentEdit[]): { applied: number; failed: string[] };
+  /** Replace the document with `next` as one undoable change, touching only
+   *  the span that differs so the cursor and scroll stay put. */
+  replaceText(next: string): void;
   /** Run the AI rephrase on the current selection (same as ⌘⇧R). */
   rephrase(): void;
+  /** Restore missing accents in the current selection (same as ⌘⇧D). */
+  restoreDiacritics(): void;
+  /** Ask for a language and translate the current selection (same as ⌘⇧T). */
+  translate(): void;
 }
 
 /**
@@ -70,7 +88,8 @@ const FORMAT_BINDINGS: Array<{ key: string; action: string }> = [
   { key: "Mod-Shift-x", action: "s" },
   { key: "Mod-Shift-c", action: "codeblock" },
   { key: "Mod-Shift-l", action: "ul" },
-  { key: "Mod-Shift-t", action: "task" },
+  // ⌘⇧T is Translate; the checklist moved to ⌘⇧U.
+  { key: "Mod-Shift-u", action: "task" },
 ];
 
 const formatKeymap = keymap.of(
@@ -2007,6 +2026,10 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // ⌘⇧T: the range to translate and where to ask for the language.
+  const [translatePick, setTranslatePick] = useState<{ from: number; to: number; x: number; y: number } | null>(
+    null,
+  );
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -2028,11 +2051,34 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
         }
         return { applied: changes.length, failed };
       },
+      replaceText: (next) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const cur = view.state.doc.toString();
+        if (cur === next) return;
+        let a = 0;
+        while (a < cur.length && a < next.length && cur[a] === next[a]) a++;
+        let b = 0;
+        while (b < cur.length - a && b < next.length - a && cur[cur.length - 1 - b] === next[next.length - 1 - b]) b++;
+        view.dispatch({ changes: { from: a, to: cur.length - b, insert: next.slice(a, next.length - b) } });
+      },
       rephrase: () => {
         const view = viewRef.current;
         if (!view) return;
         view.focus();
         rephraseSelection(view);
+      },
+      restoreDiacritics: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        view.focus();
+        restoreDiacriticsSelection(view);
+      },
+      translate: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        view.focus();
+        requestTranslate(view);
       },
     }),
     [],
@@ -2096,7 +2142,11 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     claimAnchor();
     window.addEventListener("reevik:open-note", claimAnchor);
 
+    const onTranslate = (e: Event) => setTranslatePick((e as CustomEvent).detail);
+    view.dom.addEventListener(TRANSLATE_REQUEST, onTranslate);
+
     return () => {
+      view.dom.removeEventListener(TRANSLATE_REQUEST, onTranslate);
       window.removeEventListener("reevik:open-note", claimAnchor);
       view.destroy();
       viewRef.current = null;
@@ -2111,7 +2161,30 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     });
   }, [livePreview, compartment, liveExt]);
 
-  return <div ref={hostRef} className="cm-host h-full" />;
+  return (
+    <>
+      <div ref={hostRef} className="cm-host h-full" />
+      {translatePick && (
+        <LanguagePicker
+          x={translatePick.x}
+          y={translatePick.y}
+          onClose={() => {
+            setTranslatePick(null);
+            viewRef.current?.focus();
+          }}
+          onPick={(language) => {
+            const view = viewRef.current;
+            const { from, to } = translatePick;
+            setTranslatePick(null);
+            rememberLanguage(language);
+            if (!view) return;
+            view.focus();
+            translateRange(view, from, to, language);
+          }}
+        />
+      )}
+    </>
+  );
 });
 
 export default CodeMirrorEditor;

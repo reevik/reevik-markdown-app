@@ -205,6 +205,8 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
         onChange={setMode}
       />
 
+      {/* Everything below the tabs follows the AI-panel font settings. */}
+      <div className="panel-text flex min-h-0 flex-1 flex-col">
       {mode === "chat" ? (
         <>
           {loggedOut ? (
@@ -336,9 +338,20 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
             )}
 
             {!review.data && !busy && hasText && (
-              <button onClick={() => review.mutate(content)} className="btn-bezel w-full py-1.5 text-[12px]">
-                {review.isError ? "Review again" : "Analyze document"}
-              </button>
+              <>
+                <Explainer
+                  title="An editor's read of this note"
+                  points={[
+                    "A quality score, with separate marks for clarity, structure, grammar and tone.",
+                    "A one-line verdict on where the note stands.",
+                    "Specific edits you can apply with a click — each changes a sentence or two, never the whole note.",
+                  ]}
+                  note="Runs when you ask — press ⌘⇧A or the button below, and again after you've made changes."
+                />
+                <button onClick={() => review.mutate(content)} className="btn-bezel w-full py-1.5 text-[12px]">
+                  {review.isError ? "Review again" : "Analyze document"}
+                </button>
+              </>
             )}
           </>
         ) : (
@@ -356,6 +369,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
         )}
       </div>
       )}
+      </div>
     </aside>
   );
 }
@@ -484,13 +498,24 @@ function ReferencesView({
       )}
 
       {!data && !busy && !unsupported && (
-        <button
-          onClick={() => refs.mutate(content)}
-          disabled={!canSearch}
-          className="btn-accent w-full py-2 text-[13px]"
-        >
-          {hasNote ? "Search the web for references" : "Open a note first"}
-        </button>
+        <>
+          <Explainer
+            title="Sources to back up this note"
+            points={[
+              "Searches the web for papers, documentation and articles on the note's topic.",
+              "Every link comes from a real search result — nothing is cited from memory.",
+              "Each source comes with a summary and why it's relevant; open it, or insert it as a citation.",
+            ]}
+            note="Takes 20–60 seconds, as it runs several searches."
+          />
+          <button
+            onClick={() => refs.mutate(content)}
+            disabled={!canSearch}
+            className="btn-accent w-full py-2 text-[13px]"
+          >
+            {hasNote ? "Search the web for references" : "Open a note first"}
+          </button>
+        </>
       )}
     </>
   );
@@ -656,6 +681,21 @@ function CopilotInstallHint({ className = "" }: { className?: string }) {
         npm install -g @github/copilot
       </code>
       <code className="mt-1 block rounded bg-black/10 px-1.5 py-0.5 font-mono text-[11px]">copilot login</code>
+    </div>
+  );
+}
+
+/** What a panel action is for, shown above its button before the first run. */
+function Explainer({ title, points, note }: { title: string; points: string[]; note?: string }) {
+  return (
+    <div className="mb-3 rounded-lg bg-black/[0.035] px-3 py-2.5 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+      <p className="font-medium text-[var(--text-primary)]">{title}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4 marker:text-[var(--text-tertiary)]">
+        {points.map((p) => (
+          <li key={p}>{p}</li>
+        ))}
+      </ul>
+      {note && <p className="mt-1.5 text-[var(--text-tertiary)]">{note}</p>}
     </div>
   );
 }

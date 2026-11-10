@@ -1,6 +1,6 @@
 [package]
 name = "markdown-editor"
-version = "1.3.0"
+version = "1.4.0"
 description = "Reevik — a glossy markdown editor with vaults and an AI agent"
 authors = ["Erhan Bağdemir"]
 license = "Apache-2.0"
@@ -31,3 +31,6 @@ keyring = { version = "4.1.4", features = ["apple-native-keyring-store"] }
 tokio = { version = "1.52.3", features = ["full"] }
 reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 window-vibrancy = "0.7.1"
+# Already in the tree via tauri-utils; used directly to rewrite links when
+# the vault is reorganized.
+regex = "1"

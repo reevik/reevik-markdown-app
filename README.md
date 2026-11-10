@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.0.beta-6d5ff2" alt="version">
+  <img src="https://img.shields.io/badge/version-1.4.0.beta-6d5ff2" alt="version">
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-111" alt="platform">
   <img src="https://img.shields.io/badge/licence-Apache%202.0-1baf7a" alt="licence">
 </p>
@@ -154,13 +154,16 @@ your own **Anthropic API key**, stored in the macOS Keychain.
 | `⌘K` / `⌘⇧P` | Command palette |
 | `⌘/` | Toggle Markdown source |
 | `⌘⌥1` `⌘⌥2` `⌘⌥3` | Toggle sidebar / AI panel / toolbar |
-| `⌘⇧A` | Editorial review |
+| `⌘⇧E` | Editorial chat |
+| `⌘⇧A` | Analyze document |
 | `⌘⇧F` | Find references |
 | `⌘⇧R` | Rephrase selection |
+| `⌘⇧D` | Restore diacritics |
+| `⌘⇧T` | Translate selection |
 | `⌘⇧O` | Open vault |
 | `⌘,` | Settings |
 | `⌘B` `⌘I` `⌘E` `⌘⇧K` | Bold / italic / inline code / link |
-| `⌘⇧X` `⌘⇧C` `⌘⇧L` `⌘⇧T` | Strikethrough / code block / list / checklist |
+| `⌘⇧X` `⌘⇧C` `⌘⇧L` `⌘⇧U` | Strikethrough / code block / list / checklist |
 
 ## Getting started
 
