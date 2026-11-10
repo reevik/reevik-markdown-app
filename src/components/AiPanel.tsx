@@ -32,8 +32,9 @@ interface Props {
 
 /**
  * The three faces of the panel. Editorial is the conversation; Analyze is the
- * automatic review (what used to be called Editorial); References is the web
- * search. ⌘⇧E / ⌘⇧A / ⌘⇧F switch between them.
+ * on-demand review (what used to be called Editorial); References is the web
+ * search. ⌘⇧E / ⌘⇧A / ⌘⇧F switch between them. Nothing here runs on its own:
+ * every AI call is started by the author.
  */
 type Mode = "chat" | "analyze" | "references";
 
@@ -65,8 +66,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
   const contentRef = useRef(content);
   contentRef.current = content;
 
-  // Logged out counts as no backend: nothing will run until the author signs in,
-  // and auto-review shouldn't fire into a guaranteed failure.
+  // Logged out counts as no backend: nothing will run until the author signs in.
   const loggedOut = backend === "cli-logged-out";
   const copilotMissing = backend === "copilot-missing";
   const noBackend = backend === "none" || loggedOut || copilotMissing;
@@ -100,10 +100,18 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
     setApplied(new Set());
   }, [review.data]);
 
+  // Progress events carry no run id, so a run abandoned by switching notes keeps
+  // streaming after `reset()`. Only accept partials while a run is live here.
+  const reviewPending = useRef(false);
+  reviewPending.current = review.isPending;
+  const refsPending = useRef(false);
+  refsPending.current = refs.isPending;
+
   // The backend streams the raw reply as it is generated; decode whatever keys
   // have fully arrived so the score/suggestions show up before the rewrite ends.
   useEffect(() => {
     const un = listen<string>("ai:review-progress", (e) => {
+      if (!reviewPending.current) return;
       setStreaming(parsePartialJson<Review>(e.payload));
     });
     return () => {
@@ -120,6 +128,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
   // web round-trips would otherwise leave the panel silent for a minute.
   useEffect(() => {
     const un = listen<{ text: string; activity: string }>("ai:references-progress", (e) => {
+      if (!refsPending.current) return;
       setRefsStreaming(parsePartialJson<ReferenceResult>(e.payload.text));
       setActivity(e.payload.activity);
     });
@@ -135,30 +144,11 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
     }
   }, [refs.isPending]);
 
-  // Editorial runs on its own when a note is opened — but only once per note, so
-  // typing (or flipping between tabs) doesn't fire a burst of paid AI calls.
-  const reviewed = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!path || noBackend || !hasText || reviewed.current.has(path)) return;
-    const id = window.setTimeout(() => {
-      if (reviewed.current.has(path)) return;
-      reviewed.current.add(path);
-      // Run it, but don't pull the author off the conversation to show it.
-      setMode((m) => (m === "chat" ? m : "analyze"));
-      review.mutate(contentRef.current);
-    }, 800);
-    return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, noBackend, hasText]);
-
   // ⌘⇧A / ⌘⇧F (and the palette) arrive as window events.
   useEffect(() => {
     const runReview = () => {
       setMode("analyze");
-      if (canReview) {
-        if (path) reviewed.current.add(path);
-        review.mutate(contentRef.current);
-      }
+      if (canReview) review.mutate(contentRef.current);
     };
     const runRefs = () => {
       setMode("references");
@@ -173,7 +163,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
       window.removeEventListener("reevik:ai-references", runRefs);
       window.removeEventListener("reevik:ai-chat", openChat);
     };
-  }, [canReview, canSearch, path, review, refs]);
+  }, [canReview, canSearch, review, refs]);
 
   function applySuggestion(index: number, s: Suggestion) {
     if (!s.original) return;
@@ -347,7 +337,7 @@ export default function AiPanel({ width, vaultPath, path, content, onApply, onAp
 
             {!review.data && !busy && hasText && (
               <button onClick={() => review.mutate(content)} className="btn-bezel w-full py-1.5 text-[12px]">
-                Review again
+                {review.isError ? "Review again" : "Analyze document"}
               </button>
             )}
           </>

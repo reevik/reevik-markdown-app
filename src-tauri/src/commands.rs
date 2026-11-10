@@ -88,8 +88,13 @@ pub fn save_vaults(path: &Path, vaults: &[VaultRef]) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 // Documents (filesystem)
 // ---------------------------------------------------------------------------
+//
+// Every command that touches vault files is `#[tauri::command(async)]`. A plain
+// sync command runs on the main thread, and in an iCloud vault any file access
+// can stall for seconds while macOS downloads an evicted file — freezing the
+// whole window. `(async)` runs the same body on Tauri's async runtime instead.
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_vault_tree(vault: String, state: State<'_, AppState>) -> Result<Vec<TreeNode>, String> {
     let root = PathBuf::from(&vault);
     ensure_within_vaults(&root, &state)?;
@@ -98,7 +103,7 @@ pub fn read_vault_tree(vault: String, state: State<'_, AppState>) -> Result<Vec<
 
 /// Backs the Content Index block: every Markdown note at or below `dir`, titled
 /// from its frontmatter, ready to render as a contents list.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_content_index(
     dir: String,
     max_depth: usize,
@@ -113,7 +118,7 @@ pub fn read_content_index(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_note(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let p = PathBuf::from(&path);
     ensure_within_vaults(&p, &state)?;
@@ -127,7 +132,7 @@ pub struct FileStat {
     pub modified_ms: i64,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_stat(path: String, state: State<'_, AppState>) -> Result<FileStat, String> {
     let p = PathBuf::from(&path);
     ensure_within_vaults(&p, &state)?;
@@ -144,14 +149,14 @@ pub fn file_stat(path: String, state: State<'_, AppState>) -> Result<FileStat, S
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_note(path: String, contents: String, state: State<'_, AppState>) -> Result<(), String> {
     let p = PathBuf::from(&path);
     ensure_within_vaults(&p, &state)?;
     fs_vault::write_note(&p, &contents).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_note(dir: String, name: String, state: State<'_, AppState>) -> Result<String, String> {
     let d = PathBuf::from(&dir);
     ensure_within_vaults(&d, &state)?;
@@ -160,7 +165,7 @@ pub fn create_note(dir: String, name: String, state: State<'_, AppState>) -> Res
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_folder(dir: String, name: String, state: State<'_, AppState>) -> Result<String, String> {
     let d = PathBuf::from(&dir);
     ensure_within_vaults(&d, &state)?;
@@ -169,7 +174,7 @@ pub fn create_folder(dir: String, name: String, state: State<'_, AppState>) -> R
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_path(from: String, name: String, state: State<'_, AppState>) -> Result<String, String> {
     let f = PathBuf::from(&from);
     ensure_within_vaults(&f, &state)?;
@@ -180,7 +185,7 @@ pub fn rename_path(from: String, name: String, state: State<'_, AppState>) -> Re
 
 /// Copy external files into the vault. Only the destination is path-guarded —
 /// the sources are deliberately outside the vault, which is the whole point.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_files(
     dir: String,
     sources: Vec<String>,
@@ -196,7 +201,7 @@ pub fn import_files(
     Ok(added)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_path(from: String, dir: String, state: State<'_, AppState>) -> Result<String, String> {
     let f = PathBuf::from(&from);
     let d = PathBuf::from(&dir);
@@ -207,7 +212,7 @@ pub fn move_path(from: String, dir: String, state: State<'_, AppState>) -> Resul
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_path(path: String, state: State<'_, AppState>) -> Result<(), String> {
     let p = PathBuf::from(&path);
     ensure_within_vaults(&p, &state)?;
@@ -321,7 +326,7 @@ fn mime_for(ext: &str) -> &'static str {
 /// Reads an image referenced by a note and returns it as a `data:` URL. `src` is
 /// resolved relative to the note's directory (or used as-is when absolute), and
 /// must resolve inside a registered vault.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_image_data_url(
     note_path: String,
     src: String,
@@ -340,7 +345,7 @@ pub fn read_image_data_url(
 
 /// Saves a pasted/dropped image into an `assets/` folder beside the note and
 /// returns the note-relative path to embed, e.g. `assets/image-….png`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_attachment(
     note_path: String,
     data_base64: String,

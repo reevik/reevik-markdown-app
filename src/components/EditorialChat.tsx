@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
 import CliLoginHint from "./CliLoginHint";
 import Markdown from "./Markdown";
+import Spinner from "./Spinner";
 import { preview, splitReply, type AgentEdit, type EditOutcome } from "../lib/agentEdits";
 import { chat, CLI_NOT_LOGGED_IN } from "../lib/api";
 import type { ChatMessage } from "../lib/types";
@@ -326,14 +327,6 @@ function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 002 2h7a2 2 0 002-2l1-12M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2" />
-    </svg>
-  );
-}
-
-function Spinner() {
-  return (
-    <svg viewBox="0 0 24 24" width="13" height="13" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
-      <path d="M12 3a9 9 0 019 9" />
     </svg>
   );
 }

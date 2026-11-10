@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.2.0.beta-6d5ff2" alt="version">
+  <img src="https://img.shields.io/badge/version-1.3.0.beta-6d5ff2" alt="version">
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-111" alt="platform">
   <img src="https://img.shields.io/badge/licence-Apache%202.0-1baf7a" alt="licence">
 </p>
@@ -122,7 +122,7 @@ disk, which is the bare ` ```content-index ` fence.
 Powered by Claude, through either the local **`claude` CLI** (no API key needed) or
 your own **Anthropic API key**, stored in the macOS Keychain.
 
-- **Editorial review** runs automatically when you open a note: a **quality score**
+- **Editorial review** runs when you ask for it (`⌘⇧A`, or **Analyze document** in the panel): a **quality score**
   (stars, percentage and per-dimension ratings for clarity, structure, grammar and
   tone), a one-line assessment, and a list of concrete edits.
 - **Click-to-apply suggestions** — each is a self-contained original → replacement

@@ -4,6 +4,25 @@ All notable changes to Reevik are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0.beta] — 2026-11-10
+
+### Changed
+
+- **Analyze no longer runs on its own.** Opening a note used to start a review
+  after a short pause; it now runs only when you press `⌘⇧A`, pick **Analyze
+  document** in the palette, or click **Analyze document** in the panel.
+
+### Fixed
+
+- Opening notes in an iCloud vault could freeze the whole window for seconds.
+  macOS keeps rarely used iCloud files in the cloud, and reading one waits for
+  the download; the read ran on the main thread, so the app stopped responding
+  until it finished. Vault file access now happens in the background, and a
+  note that takes a moment to open shows a spinner, both in its tab and in the
+  editor.
+- An Analyze run abandoned by switching notes no longer shows its results in
+  the next note's panel.
+
 ## [1.2.0.beta] — 2026-11-10
 
 ### Added

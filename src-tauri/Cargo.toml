@@ -1,6 +1,6 @@
 [package]
 name = "markdown-editor"
-version = "1.2.0"
+version = "1.3.0"
 description = "Reevik — a glossy markdown editor with vaults and an AI agent"
 authors = ["Erhan Bağdemir"]
 license = "Apache-2.0"

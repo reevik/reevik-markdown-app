@@ -34,7 +34,16 @@ export function readVaultTree(vault: string): Promise<TreeNode[]> {
   return invoke("read_vault_tree", { vault });
 }
 
-export function readNote(path: string): Promise<string> {
+/**
+ * The latest write issued for each note. File commands run off the main thread,
+ * so they no longer finish in the order they were sent: an autosave stalled by
+ * iCloud could land after the next one and leave older text on disk. Each write
+ * to a note waits for the previous one, and a read waits for both.
+ */
+const pendingWrites = new Map<string, Promise<void>>();
+
+export async function readNote(path: string): Promise<string> {
+  await pendingWrites.get(path)?.catch(() => {});
   return invoke("read_note", { path });
 }
 
@@ -65,7 +74,27 @@ export function fileStat(path: string): Promise<FileStat> {
 }
 
 export function writeNote(path: string, contents: string): Promise<void> {
-  return invoke("write_note", { path, contents });
+  const prev = pendingWrites.get(path);
+  const write = prev
+    ? prev.catch(() => {}).then(() => invoke<void>("write_note", { path, contents }))
+    : invoke<void>("write_note", { path, contents });
+  pendingWrites.set(path, write);
+  const settle = () => {
+    if (pendingWrites.get(path) === write) pendingWrites.delete(path);
+  };
+  write.then(settle, settle);
+  return write;
+}
+
+/** Settles once every write to `path`, or to a note under it, has finished, so
+ *  a rename, move or delete can't be overtaken by one and recreate the file. */
+function writesUnder(path: string): Promise<unknown> {
+  const prefix = `${path}/`;
+  const waits: Promise<void>[] = [];
+  for (const [p, write] of pendingWrites) {
+    if (p === path || p.startsWith(prefix)) waits.push(write);
+  }
+  return Promise.allSettled(waits);
 }
 
 export function createNote(dir: string, name: string): Promise<string> {
@@ -76,7 +105,8 @@ export function createFolder(dir: string, name: string): Promise<string> {
   return invoke("create_folder", { dir, name });
 }
 
-export function renamePath(from: string, name: string): Promise<string> {
+export async function renamePath(from: string, name: string): Promise<string> {
+  await writesUnder(from);
   return invoke("rename_path", { from, name });
 }
 
@@ -86,11 +116,13 @@ export function importFiles(dir: string, sources: string[]): Promise<string[]> {
 }
 
 /** Move a file/folder into `dir`; returns the new path. */
-export function movePath(from: string, dir: string): Promise<string> {
+export async function movePath(from: string, dir: string): Promise<string> {
+  await writesUnder(from);
   return invoke("move_path", { from, dir });
 }
 
-export function deletePath(path: string): Promise<void> {
+export async function deletePath(path: string): Promise<void> {
+  await writesUnder(path);
   return invoke("delete_path", { path });
 }
 

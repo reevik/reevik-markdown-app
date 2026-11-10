@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import CodeMirrorEditor, { type EditorHandle, type EditSpec } from "./CodeMirrorEditor";
 import type { AgentEdit } from "../lib/agentEdits";
 import InsertToolbar from "./InsertToolbar";
+import Spinner from "./Spinner";
 import StatusBar from "./StatusBar";
 import type { OpenDoc } from "../App";
 
@@ -113,8 +114,14 @@ const Editor = forwardRef<EditorApi, Props>(function Editor(
             <p className="text-[12px] text-[var(--text-tertiary)]">Pick a document from the sidebar to open it.</p>
           </div>
         ) : active.loading ? (
-          <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-tertiary)]">
-            Loading…
+          // Delayed fade-in: a local read is instant and shouldn't flash a spinner;
+          // an iCloud file still in the cloud can take seconds to download.
+          <div
+            role="status"
+            className="loading-in flex h-full flex-col items-center justify-center gap-3 text-[var(--text-tertiary)]"
+          >
+            <Spinner size={22} />
+            <p className="max-w-[80%] truncate text-[13px]">Loading {active.name}…</p>
           </div>
         ) : (
           <>
@@ -263,7 +270,11 @@ function TabStrip({
                 : "border-transparent border-b-black/10 border-r-black/[0.06] text-[var(--text-secondary)] hover:bg-black/[0.04]"
             }`}
           >
-            <FileIcon className={active ? "opacity-80" : "opacity-50"} />
+            {d.loading ? (
+              <Spinner className="loading-in text-[var(--text-tertiary)]" />
+            ) : (
+              <FileIcon className={active ? "opacity-80" : "opacity-50"} />
+            )}
             <span className="max-w-[150px] truncate">{d.name}</span>
             <span className="relative flex h-4 w-4 items-center justify-center">
               {dirty && (

@@ -566,13 +566,17 @@ select.field option {
   font-size: 12px;
 }
 
-@keyframes spin {
+/* Fades in only after a beat, so a load that finishes at once shows nothing. */
+@keyframes loading-in {
+  from {
+    opacity: 0;
+  }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
   }
 }
-.spinner {
-  animation: spin 0.7s linear infinite;
+.loading-in {
+  animation: loading-in 0.2s ease 0.15s both;
 }
 
 @keyframes rise {
