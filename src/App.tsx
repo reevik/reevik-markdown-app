@@ -8,6 +8,7 @@ import { INSERT_ACTIONS } from "./components/InsertToolbar";
 import AiPanel from "./components/AiPanel";
 import Resizer from "./components/Resizer";
 import SettingsModal from "./components/SettingsView";
+import AboutModal from "./components/AboutModal";
 import { readNote, setToolbarChecked, writeNote } from "./lib/api";
 import { notifyVaultChanged } from "./lib/contentIndex";
 import { printNote } from "./lib/exportPdf";
@@ -57,6 +58,7 @@ function App() {
   const [openDocs, setOpenDocsState] = useState<OpenDoc[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [mode, setMode] = useState<Mode>("live");
   const editorApi = useRef<EditorApi>(null);
@@ -434,6 +436,7 @@ function App() {
       },
       { id: "vault.open", group: "Vault", title: "Open vault…", hint: "⌘⇧O", run: () => switchVault(null) },
       { id: "vault.settings", group: "Vault", title: "Preferences…", hint: "⌘,", run: () => setShowSettings(true) },
+      { id: "app.about", group: "Vault", title: "About Reevik", run: () => setShowAbout(true) },
       // Reachable from the menu/⌘K; hidden from the palette's own list.
       { id: "view.palette", group: "View", title: "Command palette", hint: "⌘K", run: () => setShowPalette((v) => !v) },
     ];
@@ -481,7 +484,13 @@ function App() {
 
   // Vault launcher — shown on startup and whenever no vault is open.
   if (!activeVault) {
-    return <VaultChooser onOpen={switchVault} />;
+    // About is in the app menu, so it can be opened from the launcher too.
+    return (
+      <>
+        <VaultChooser onOpen={switchVault} />
+        {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      </>
+    );
   }
 
   const activeDoc = openDocs.find((d) => d.path === activePath) ?? null;
@@ -540,6 +549,7 @@ function App() {
       )}
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showPalette && (
         <CommandPalette
           commands={commands.filter((c) => c.id !== "view.palette")}

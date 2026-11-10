@@ -2,12 +2,15 @@
   "name": "markdown-editor",
   "private": true,
   "version": "1.1.0",
+  "license": "Apache-2.0",
+  "author": "Erhan Bağdemir",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/generate-licenses.mjs && tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "licenses": "node scripts/generate-licenses.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",

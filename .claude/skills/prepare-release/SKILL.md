@@ -67,11 +67,11 @@ The last command is the real check on the Rust side — it fails loudly if
 
 ## 3. The UI version
 
-The About panel (**Reevik ▸ About Reevik**) is built in
-`src-tauri/src/lib.rs`, and its version string is derived, not hardcoded:
+The About page (**Reevik ▸ About Reevik**) asks the backend for its version,
+and that string is derived, not hardcoded — `src-tauri/src/lib.rs`:
 
 ```rust
-.version(Some(concat!(env!("CARGO_PKG_VERSION"), ".beta")))
+pub const DISPLAY_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".beta");
 ```
 
 So bumping `Cargo.toml` updates the UI automatically — **no code change is
@@ -79,9 +79,14 @@ needed for a normal bump**, and the user should be told that rather than left
 wondering whether the UI was missed.
 
 The one case that does need an edit is a channel change: going stable means
-dropping `concat!(…, ".beta")` down to `env!("CARGO_PKG_VERSION")`, and going to
-a different label (`.rc1`) means changing the suffix. Grep for `CARGO_PKG_VERSION`
+dropping the `concat!(…, ".beta")` down to `env!("CARGO_PKG_VERSION")`, and a
+different label (`.rc1`) means changing the suffix. Grep for `DISPLAY_VERSION`
 to confirm the line hasn't moved before editing it.
+
+The About page's list of open-source licences regenerates on every
+`npm run build` (`scripts/generate-licenses.mjs`), so a release build always
+ships the current list; commit the refreshed `src/generated/licenses.json` with
+the release if it changed.
 
 ## 4. Changelog
 

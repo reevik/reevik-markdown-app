@@ -181,10 +181,12 @@ npm run tauri build   # produce a .app and .dmg
 
 ## Licence
 
-Licensed under the Apache License, Version 2.0.
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE) for the
+full text, also available at <https://www.apache.org/licenses/LICENSE-2.0>.
 
-You may obtain a copy of the licence at
-<http://www.apache.org/licenses/LICENSE-2.0>.
+Reevik bundles open-source packages under their own licences (mostly MIT,
+Apache-2.0, BSD and ISC). The app lists every one, with its licence text, under
+**Reevik ▸ About Reevik**; see also [NOTICE](NOTICE).
 
 Unless required by applicable law or agreed to in writing, software distributed
 under the Licence is distributed on an **"AS IS" BASIS, WITHOUT WARRANTIES OR

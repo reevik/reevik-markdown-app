@@ -208,3 +208,8 @@ export const CLI_NOT_LOGGED_IN = "claude-cli-not-logged-in";
 
 /** Returned instead of a raw error when Copilot is selected but its CLI isn't installed. */
 export const COPILOT_CLI_MISSING = "copilot-cli-missing";
+
+/** The version as shown to people, e.g. "1.1.0.beta" (manifests hold plain semver). */
+export function appVersion(): Promise<string> {
+  return invoke("app_version");
+}

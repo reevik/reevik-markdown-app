@@ -45,6 +45,13 @@ body {
   border-left: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+/* Dialogs (About, open-source libraries) sit over arbitrary content, so unlike
+   the translucent panes they need a solid surface to stay legible. */
+.dialog-surface {
+  background: #fbfbfc;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 /* Draggable divider between panels. Transparent until hovered/dragged. */
 .resizer {
   position: relative;

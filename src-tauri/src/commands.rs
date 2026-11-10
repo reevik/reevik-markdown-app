@@ -591,3 +591,9 @@ pub async fn chat(
     }
     Err(cli_err.unwrap_or_else(|| NO_BACKEND.to_string()))
 }
+
+/// The version as shown to people, e.g. "1.1.0.beta".
+#[tauri::command]
+pub fn app_version() -> &'static str {
+    crate::DISPLAY_VERSION
+}

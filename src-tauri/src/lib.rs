@@ -3,10 +3,13 @@ mod fs_vault;
 mod llm;
 
 use std::sync::Mutex;
-use tauri::menu::{
-    AboutMetadataBuilder, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder,
-};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
+
+/// The version as shown to people (About page, README badge). The manifests
+/// must hold plain semver ("1.1.0"), so the release channel is appended here
+/// and nowhere else; drop the suffix when going stable.
+pub const DISPLAY_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".beta");
 
 /// A folder the user has registered as a vault (an Obsidian-style document root).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -58,29 +61,9 @@ pub fn run() {
         .menu(|handle| {
             let preferences =
                 MenuItem::with_id(handle, "vault.settings", "Preferences…", true, Some("CmdOrCtrl+,"))?;
-            // Explicit text so the label reads "About Reevik" even in dev (the auto
-            // label otherwise uses the executable/crate name). The panel shows the
-            // app icon plus an author credit.
-            // The transparent owl rather than the Dock tile: the panel draws
-            // its own background, so the tile would read as a box in a box.
-            let about_icon =
-                tauri::image::Image::from_bytes(include_bytes!("../app-logo.png")).ok();
-            let about = PredefinedMenuItem::about(
-                handle,
-                Some("About Reevik"),
-                Some(
-                    AboutMetadataBuilder::new()
-                        .name(Some("Reevik"))
-                        // Manifests must stay valid semver ("1.0.0"); the pre-release
-                        // suffix is display-only.
-                        .version(Some(concat!(env!("CARGO_PKG_VERSION"), ".beta")))
-                        .comments(Some("A glossy Markdown editor.\nDeveloped by Erhan Bağdemir."))
-                        .authors(Some(vec!["Erhan Bağdemir".to_string()]))
-                        .copyright(Some("© 2026 Erhan Bağdemir"))
-                        .icon(about_icon)
-                        .build(),
-                ),
-            )?;
+            // An in-app About page rather than the native panel, which has no
+            // room for the licence and the list of open-source components.
+            let about = MenuItem::with_id(handle, "app.about", "About Reevik", true, None::<&str>)?;
             let app_menu = SubmenuBuilder::new(handle, "Reevik")
                 .item(&about)
                 .separator()
@@ -343,6 +326,7 @@ pub fn run() {
             commands::find_references,
             commands::rephrase,
             commands::chat,
+            commands::app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
