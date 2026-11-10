@@ -4,6 +4,23 @@ All notable changes to Reevik are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0.beta] — 2026-11-10
+
+### Added
+
+- **About page** — **Reevik ▸ About Reevik** now opens an in-app page with the
+  version, a link to the Apache License 2.0, and **Open-source libraries used in
+  the editor**. That opens a scrollable window listing all 526 npm packages and
+  Rust crates bundled in Reevik; select one to read its licence text or open its
+  source, or filter by name or licence.
+
+### Changed
+
+- **Reevik is licensed under the Apache License 2.0**, now stated in a
+  `LICENSE` file, a `NOTICE`, and the app's own metadata, not only the README.
+- The list of open-source licences is regenerated with every build, so each
+  release lists exactly the libraries it ships.
+
 ## [1.1.0.beta] — 2026-11-09
 
 ### Added
