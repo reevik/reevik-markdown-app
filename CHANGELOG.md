@@ -4,7 +4,66 @@ All notable changes to Reevik are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0.beta] — unreleased
+## [1.7.0] — 2026-11-11
+
+The first stable release: everything from the 1.x betas, no longer marked beta.
+
+### Changed
+
+- **Reevik is out of beta.** About shows `1.7.0`, and this release is GitHub's
+  latest rather than a pre-release.
+
+### Fixed
+
+- About and the `.dmg` name show the release's real version again — the 1.5.0 and
+  1.6.0 betas reported themselves as 1.4.0.
+
+## [1.6.0.beta] — 2026-11-11
+
+### Added
+
+- **Hidden notes** — hide a note for privacy from its row (the crossed-out eye) or
+  for a whole selection. Hidden notes leave the tree, label counts, `[[`
+  suggestions and Content Index lists, and Clean Up and Reorganize never send them
+  to the AI. The eye button in the sidebar toolbar shows them, faded, until it's
+  switched off again; every launch starts with them hidden. Stored in the vault's
+  `.reevik/hidden.json`, so they stay hidden on every Mac. This is hiding, not
+  protection: the files themselves are untouched.
+
+### Changed
+
+- The README now outlines Reevik's distinctive features only.
+
+### Known issues
+
+- This build reports itself as **1.4.0** in About and in its `.dmg` name. Fixed in
+  1.7.0.
+
+## [1.5.0.beta] — 2026-11-11
+
+### Added
+
+- **Links open on click** — web links in your browser, notes in Reevik (at the
+  heading for `#section` links), other files revealed in Finder. In Live Preview a
+  click on a shown link opens it; `⌘`-click always does.
+- **`[[Wikilinks]]`**, as Obsidian writes them: `[[Note]]` finds a note by name
+  anywhere in the vault, `[[Folder/Note]]` by path; `#Heading` and `|alias` work.
+  A link to a note that doesn't exist is drawn faded.
+- **Link autocompletion** — type `[[` for notes (inserting the shortest name that's
+  unique, so links survive moves) or `](` for relative paths.
+- **Reorganize** keeps `[[Folder/Note]]` links working when it moves notes.
+
+### Changed
+
+- Several selected notes draw as a single block, like a Finder selection.
+- A bare `[text]` is shown as plain text rather than as a link that goes nowhere.
+
+### Known issues
+
+- This build reports itself as **1.4.0** in About and in its `.dmg` name. Fixed in
+  1.7.0.
+
+## [1.4.0.beta] — 2026-11-10
 
 ### Added
 

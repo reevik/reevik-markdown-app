@@ -7,10 +7,11 @@ use std::sync::Mutex;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 
-/// The version as shown to people (About page, README badge). The manifests
-/// must hold plain semver ("1.1.0"), so the release channel is appended here
-/// and nowhere else; drop the suffix when going stable.
-pub const DISPLAY_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".beta");
+/// The version as shown to people (About page, README badge). Stable releases
+/// show the version as is; for a pre-release, append the channel here (e.g.
+/// `concat!(env!("CARGO_PKG_VERSION"), ".beta")`) — the manifests must stay
+/// plain semver.
+pub const DISPLAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A folder the user has registered as a vault (an Obsidian-style document root).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
