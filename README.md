@@ -9,9 +9,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.7.0-6d5ff2" alt="version">
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-111" alt="platform">
-  <img src="https://img.shields.io/badge/licence-Apache%202.0-1baf7a" alt="licence">
+  <img src="https://img.shields.io/badge/GET%201.7.0-%23000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="version">
+  <img src="https://img.shields.io/badge/apache%202.0-%23C71A36.svg?style=for-the-badge&logo=apachemaven&logoColor=white" alt="platform">
 </p>
 
 <table align="center">
