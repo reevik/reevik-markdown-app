@@ -264,8 +264,9 @@ pub fn reveal_in_finder(path: String, app: tauri::AppHandle) -> Result<(), Strin
 /// bad AI reply can't turn this into "open an arbitrary file/scheme".
 #[tauri::command]
 pub fn open_external(url: String, app: tauri::AppHandle) -> Result<(), String> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("only http(s) links can be opened".to_string());
+    // Web pages and email only — never `file:` or app schemes from a note.
+    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) {
+        return Err("only http(s) and mailto links can be opened".to_string());
     }
     app.opener()
         .open_url(&url, None::<&str>)

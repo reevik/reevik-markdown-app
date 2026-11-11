@@ -164,6 +164,11 @@ function runOnRange(view: EditorView, from: number, to: number, opts: RunOptions
     });
 }
 
+/** A few words on a flag at `at`, then gone — e.g. "No note “Plan”". */
+export function notify(view: EditorView, at: number, label: string, tone: "note" | "error" = "note") {
+  flash(view, at, label, tone);
+}
+
 /** A few words on the flag, then gone. */
 function flash(view: EditorView, at: number, label: string, tone: "note" | "error") {
   try {

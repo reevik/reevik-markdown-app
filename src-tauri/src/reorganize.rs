@@ -237,7 +237,7 @@ pub fn apply(root: &Path, moves: &[(PathBuf, PathBuf)]) -> Result<ApplyReport> {
         let old = normalize(&old);
         let new = map.get(&old).cloned().unwrap_or_else(|| old.clone());
         let Ok(text) = std::fs::read_to_string(&old) else { continue };
-        if let Some(rewritten) = rewrite_links(&text, &old, &new, &map) {
+        if let Some(rewritten) = rewrite_links(&text, &old, &new, &map, root) {
             writes.push((new, rewritten));
         }
     }
@@ -300,13 +300,22 @@ static REFDEF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^(\s{0,3}\[[^\]\
 /// `src="…"` / `href='…'` in inline HTML.
 static HTML_ATTR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"((?:src|href)\s*=\s*)("[^"\n]*"|'[^'\n]*')"#).unwrap());
 static SCHEME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9+.\-]*:").unwrap());
+/// Obsidian wikilinks: `[[target#heading|alias]]`.
+static WIKI: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\[([^\[\]\n|#]+)((?:#[^\[\]\n|]*)?(?:\|[^\[\]\n]*)?)\]\]").unwrap());
 
 /// Rewrites the relative links in a note that moves from `old` to `new`, or
 /// that points at notes in `moved`. Links inside fenced code are left alone,
 /// as are links to the web, anchors, absolute paths, and anything that
 /// doesn't resolve to a real file — a link that was already broken is the
 /// author's business. `None` when nothing changes.
-pub fn rewrite_links(text: &str, old: &Path, new: &Path, moved: &HashMap<PathBuf, PathBuf>) -> Option<String> {
+pub fn rewrite_links(
+    text: &str,
+    old: &Path,
+    new: &Path,
+    moved: &HashMap<PathBuf, PathBuf>,
+    root: &Path,
+) -> Option<String> {
     let old_dir = old.parent()?;
     let new_dir = new.parent()?;
     let note_moved = old != new;
@@ -371,6 +380,20 @@ pub fn rewrite_links(text: &str, old: &Path, new: &Path, moved: &HashMap<PathBuf
                 })
                 .into_owned();
         }
+        l = WIKI
+            .replace_all(&l, |c: &Captures| {
+                let target = c[1].trim();
+                if !target.contains('/') {
+                    return c[0].to_string();
+                }
+                let has_ext = Path::new(target).extension().is_some_and(|e| e.eq_ignore_ascii_case("md"));
+                let full = normalize(&root.join(if has_ext { target.to_string() } else { format!("{target}.md") }));
+                let Some(dest) = moved.get(&full) else { return c[0].to_string() };
+                let rel = dest.strip_prefix(root).unwrap_or(dest).to_string_lossy().into_owned();
+                let rel = if has_ext { rel } else { rel.trim_end_matches(".md").to_string() };
+                format!("[[{rel}{}]]", &c[2])
+            })
+            .into_owned();
         l = HTML_ATTR
             .replace_all(&l, |c: &Captures| {
                 let q = &c[2][..1];
@@ -450,7 +473,11 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("Notes/Plan B.md"), "# Plan\n\nBack to [the trip](../Inbox/Trip.md).\n[ref]: ../Inbox/Trip.md\n").unwrap();
-        fs::write(dir.join("Notes/Other.md"), "Unrelated [link](Plan%20B.md).\n").unwrap();
+        fs::write(
+            dir.join("Notes/Other.md"),
+            "Unrelated [link](Plan%20B.md).\nSee [[Inbox/Trip#Day 2|the trip]] and [[Trip]].\n",
+        )
+        .unwrap();
         dir
     }
 
@@ -486,6 +513,8 @@ mod tests {
 
         let o = fs::read_to_string(root.join("Notes/Other.md")).unwrap();
         assert!(o.contains("[link](../Travel/Plan%20B.md)"), "unmoved note pointing at a moved one: {o}");
+        assert!(o.contains("[[Travel/2026/Trip#Day 2|the trip]]"), "path wikilink follows, heading+alias kept: {o}");
+        assert!(o.contains("[[Trip]]"), "name-only wikilink untouched: {o}");
 
         // Inbox still holds assets/, so it stays; Notes still holds Other.md.
         assert!(root.join("Inbox/assets/pic.png").exists());
@@ -494,6 +523,8 @@ mod tests {
         apply(&root, &[(trip_new.clone(), trip.clone()), (plan_new.clone(), plan.clone())]).unwrap();
         let t = fs::read_to_string(&trip).unwrap();
         assert!(t.contains("![](assets/pic.png)") && t.contains("[plan](../Notes/Plan%20B.md#day-2)"), "{t}");
+        let o = fs::read_to_string(root.join("Notes/Other.md")).unwrap();
+        assert!(o.contains("[[Inbox/Trip#Day 2|the trip]]"), "undo restores the wikilink: {o}");
         assert!(!root.join("Travel").exists(), "folders the undo emptied are removed");
         let _ = fs::remove_dir_all(&root);
     }

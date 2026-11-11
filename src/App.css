@@ -45,6 +45,16 @@ body {
   border-left: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+/* Links in Live Preview open on click; say so with the cursor. A wikilink to a
+   note that doesn't exist is drawn faded with a dashed underline. */
+.cm-content .cm-link {
+  cursor: pointer;
+}
+.cm-content .cm-link-missing {
+  opacity: 0.6;
+  text-decoration-style: dashed;
+}
+
 /* AI panel content: its own font and scale (Settings ▸ Fonts ▸ AI panels).
    Code keeps its monospace font via the .md rules. */
 .panel-text {
@@ -172,6 +182,23 @@ body {
 }
 .nav-row-active:hover {
   background: var(--accent-soft);
+}
+/* A multi-selection draws as one block: adjacent selected rows share a tint,
+   and only the block's outer corners are rounded. */
+.nav-row-sel,
+.nav-row-sel:hover {
+  background: var(--accent-soft);
+}
+.nav-row-sel.sel-first {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.nav-row-sel.sel-mid {
+  border-radius: 0;
+}
+.nav-row-sel.sel-last {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 /* Text field */

@@ -25,6 +25,7 @@ import {
 import ReorganizeModal from "./ReorganizeModal";
 import { createPortal } from "react-dom";
 import { colorOf, normalizeLabel, PALETTE, remapLabels, setLabelColor, useLabels } from "../lib/labels";
+import { setVaultIndex } from "../lib/links";
 import {
   cancelTaming,
   dismissResult,
@@ -87,6 +88,20 @@ function visibleFilePaths(nodes: TreeNode[], collapsed: Set<string>, forceExpand
   }
   return out;
 }
+
+/** Every row the tree shows, folders included, in order — so a selected row
+ *  knows whether the rows around it are selected too. */
+function visibleRowPaths(nodes: TreeNode[], collapsed: Set<string>, forceExpand: boolean, out: string[] = []): string[] {
+  for (const n of nodes) {
+    out.push(n.path);
+    if (n.kind === "dir" && (forceExpand || !collapsed.has(n.path))) {
+      visibleRowPaths(n.children ?? [], collapsed, forceExpand, out);
+    }
+  }
+  return out;
+}
+
+export type SelPos = "single" | "first" | "mid" | "last";
 
 /** Paths carried by a drag: the whole selection when several were dragged. */
 const MULTI_DRAG = "application/x-reevik-paths";
@@ -195,6 +210,8 @@ export default function VaultSidebar({
   const [plan, setPlan] = useState<{ total: number; toRate: string[] } | null>(null);
   const [showStubs, setShowStubs] = useState(false);
   const notePaths = useMemo(() => collectNotePaths(tree ?? []), [tree]);
+  // The editor resolves and completes links against this list of notes.
+  useEffect(() => setVaultIndex(rootDir, notePaths), [rootDir, notePaths]);
   const stubPaths = useMemo(
     () => new Set(notePaths.filter((p) => tamer.ratings[p]?.verdict === "stub")),
     [notePaths, tamer.ratings],
@@ -329,6 +346,20 @@ export default function VaultSidebar({
     });
   }, [visibleFiles]);
   const selecting = multi.size > 1;
+
+  // Where each selected row sits in its block of adjacent selected rows.
+  const selPositions = useMemo(() => {
+    const out = new Map<string, SelPos>();
+    if (!selecting) return out;
+    const rows = visibleRowPaths(displayed, collapsed, forceExpand);
+    rows.forEach((p, i) => {
+      if (!multi.has(p)) return;
+      const above = i > 0 && multi.has(rows[i - 1]);
+      const below = i < rows.length - 1 && multi.has(rows[i + 1]);
+      out.set(p, above && below ? "mid" : above ? "last" : below ? "first" : "single");
+    });
+    return out;
+  }, [selecting, multi, displayed, collapsed, forceExpand]);
 
   function selectFile(path: string, e: React.MouseEvent) {
     if (e.shiftKey) {
@@ -619,6 +650,7 @@ export default function VaultSidebar({
             collapsed={collapsed}
             forceExpand={forceExpand}
             multi={selecting ? multi : EMPTY_SET}
+            selPositions={selPositions}
             onSelectFile={selectFile}
             onMoveMany={(paths, dir) => void moveMany(paths, dir)}
             ratings={tamer.ratings}
@@ -777,6 +809,8 @@ interface RowProps {
   onDelete: (node: TreeNode) => void;
   /** The multi-selection (empty unless two or more files are selected). */
   multi: Set<string>;
+  /** Each selected row's place in its block, for drawing the block as one. */
+  selPositions: Map<string, SelPos>;
   onSelectFile: (path: string, e: React.MouseEvent) => void;
   onMoveMany: (paths: string[], dir: string) => void;
 }
@@ -789,6 +823,7 @@ function TreeRow(props: RowProps) {
   // While filtering, folders are force-expanded so matches stay visible.
   const isOpen = isDir && (forceExpand || !collapsed.has(node.path));
   const active = selectedPath === node.path;
+  const sel = props.selPositions.get(node.path);
   const pad = 8 + depth * 14;
 
   if (renaming === node.path) {
@@ -855,8 +890,13 @@ function TreeRow(props: RowProps) {
         }
         style={{ paddingLeft: pad }}
         className={`group nav-row flex items-center gap-1.5 py-1 pr-1.5 text-[13px] ${
-          active ? "nav-row-active" : "text-[var(--text-primary)]"
-        } ${props.multi.has(node.path) && !active ? "bg-[var(--accent-soft)]" : ""} ${
+          sel
+            ? // Inside a selection the open note keeps only its accent colour, no outline.
+              `nav-row-sel sel-${sel} ${active ? "text-[var(--accent-strong)]" : "text-[var(--text-primary)]"}`
+            : active
+              ? "nav-row-active"
+              : "text-[var(--text-primary)]"
+        } ${
           isDir && props.dragOver === node.path
             ? "bg-[var(--accent-soft)] ring-1 ring-inset ring-[var(--accent)]/50"
             : ""

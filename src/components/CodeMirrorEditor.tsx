@@ -30,6 +30,8 @@ import {
   translateRange,
 } from "./collab";
 import LanguagePicker from "./LanguagePicker";
+import { claimPendingAnchor, openNoteAt, scrollToAnchor } from "./noteAnchor";
+import { definitions, findWikilinks, linkClicks, linkCompletion, linkTarget as linkHref, wikiDecorations } from "./linkNav";
 import { rememberLanguage } from "../lib/languages";
 import { resolveEdits, type AgentEdit } from "../lib/agentEdits";
 import { INSERT_ACTIONS } from "./InsertToolbar";
@@ -962,39 +964,6 @@ function contentIndexBlocks(state: EditorState): IndexBlock[] {
   return out;
 }
 
-/**
- * Where a Content Index link wants the editor to land. The note may not be open
- * yet — the read is async and the editor remounts per note — so the request is
- * parked here and claimed by whichever editor mounts for that path.
- */
-let pendingAnchor: { path: string; anchor: string } | null = null;
-
-/** Put the cursor on the heading `anchor` names, and scroll it into view. */
-function scrollToAnchor(view: EditorView, anchor: string) {
-  const doc = view.state.doc;
-  for (let n = 1; n <= doc.lines; n++) {
-    const line = doc.line(n);
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line.text);
-    if (!heading) continue;
-    if (slugify(heading[2].trim().replace(/#+$/, "").trim()) !== anchor) continue;
-    view.dispatch({
-      selection: { anchor: line.from },
-      effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 24 }),
-    });
-    return;
-  }
-}
-
-/** Mirrors the slug the Rust side builds, so anchors match on both ends. */
-function slugify(title: string): string {
-  let out = "";
-  for (const ch of title) {
-    if (/[\p{L}\p{N}_]/u.test(ch)) out += ch.toLowerCase();
-    else if ((ch === " " || ch === "-") && out !== "" && !out.endsWith("-")) out += "-";
-  }
-  return out.replace(/-+$/, "");
-}
-
 function dirOf(path: string): string {
   const cut = path.lastIndexOf("/");
   return cut > 0 ? path.slice(0, cut) : "/";
@@ -1222,11 +1191,7 @@ class ContentIndexWidget extends WidgetType {
           link.addEventListener("click", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            // Park the heading for the editor that ends up showing this note —
-            // it may still have to be read off disk and mounted.
-            pendingAnchor = entry.anchor ? { path: entry.path, anchor: entry.anchor } : null;
-            // The widget has no handle on the app's tab state; App listens.
-            window.dispatchEvent(new CustomEvent("reevik:open-note", { detail: entry.path }));
+            openNoteAt(entry.path, entry.anchor || null);
           });
           item.appendChild(link);
         }
@@ -1811,6 +1776,18 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
   const htmls = htmlBlocks(view.state).filter((h) => !h.editing);
   const codeRanges: [number, number][] = [];
 
+  // [[wikilinks]] aren't part of the Markdown grammar, so they're found
+  // separately — outside any block drawn as a widget — and the `[…]` the parser
+  // sees inside one is left alone below.
+  const widgetBlocks = [...charts, ...mermaids, ...indexes, ...maths, ...tables, ...htmls];
+  const wikis = view.visibleRanges
+    .flatMap(({ from, to }) => findWikilinks(view.state, from, to))
+    .filter((w) => !(fmEnd > 0 && w.from < fmEnd) && !widgetBlocks.some((b) => w.from < b.to && w.to > b.from));
+  deco.push(...wikiDecorations(wikis, notePath, editing));
+  const inWiki = (a: number, b: number) => wikis.some((w) => a >= w.from && b <= w.to);
+  // A `[text]` is only a link if it points somewhere (see linkTarget).
+  const defs = definitions(view.state);
+
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(view.state).iterate({
       from,
@@ -1865,12 +1842,15 @@ function buildDecorations(view: EditorView, notePath: string): DecorationSet {
           // Tint just the bullet/number, not the item's text.
           deco.push(Decoration.mark({ class: "cm-list-mark" }).range(node.from, node.to));
         } else if (name === "Link") {
+          if (inWiki(node.from, node.to) || !linkHref(view.state, node.node, defs)) return;
           deco.push(Decoration.mark({ class: "cm-link" }).range(node.from, node.to));
         } else if (MARK_NODES.has(name)) {
           const parent = node.node.parent;
           if (!parent) return;
           if (name === "CodeMark" && parent.name !== "InlineCode") return;
           if ((name === "LinkMark" || name === "URL") && parent.name !== "Link") return;
+          // Brackets of a wikilink, or of a `[text]` that isn't a link, stay visible.
+          if (name === "LinkMark" && (inWiki(parent.from, parent.to) || !linkHref(view.state, parent, defs))) return;
           if (editing(parent.from, parent.to)) return;
 
           let end = node.to;
@@ -2121,6 +2101,8 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
         contentIndexReadOnly,
         theme,
         attachmentHandlers(notePath),
+        linkClicks(notePath),
+        linkCompletion(notePath),
         compartment.of(livePreview ? liveExt : []),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString());
@@ -2134,10 +2116,8 @@ const CodeMirrorEditor = forwardRef<EditorHandle, Props>(function CodeMirrorEdit
     // opened it (parked before this editor existed) or the note was already
     // open, in which case the event arrives while we're mounted.
     const claimAnchor = () => {
-      if (pendingAnchor?.path !== notePath) return;
-      const { anchor } = pendingAnchor;
-      pendingAnchor = null;
-      scrollToAnchor(view, anchor);
+      const anchor = claimPendingAnchor(notePath);
+      if (anchor) scrollToAnchor(view, anchor);
     };
     claimAnchor();
     window.addEventListener("reevik:open-note", claimAnchor);
