@@ -2,7 +2,7 @@
   <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Reevik icon">
 </p>
 
-<h1 align="center">Reevik Markdown Editor</h1>
+<h1 align="center">Reevik's Markdown Editor</h1>
 
 <p align="center">
 <b>A Markdown editor for macOS — Live preview embedded charts and diagrams, and a built-in Claude writing agent. (Claude Code or Copilot CLI required)</b>
