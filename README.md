@@ -5,7 +5,7 @@
 <h1 align="center">Reevik Markdown Editor</h1>
 
 <p align="center">
-<b>A Markdown editor for macOS — Live preview embedded charts and diagrams, and a built-in Claude writing agent. (Claude Code required)</b>
+<b>A Markdown editor for macOS — Live preview embedded charts and diagrams, and a built-in Claude writing agent. (Claude Code or Copilot CLI required)</b>
 </p>
 
 <p align="center">
@@ -17,10 +17,10 @@
 <table align="center">
   <tr>
     <td width="50%">
-      <img src="docs/screenshots/vault-enter.png" alt="Live preview with tabs and the file tree">
+      <img src="docs/screenshots/launcher.png" alt="The vault launcher: recent vaults, open a folder, or create a new vault">
     </td>
     <td width="50%">
-      <img src="docs/screenshots/AI-collab.png" alt="A Vega-Lite chart and a Mermaid diagram in a note">
+      <img src="docs/screenshots/editor-analyze.png" alt="A note in Live Preview beside the file tree, with the AI panel's Analyze review and click-to-apply edits">
     </td>
   </tr>
 </table>
@@ -54,9 +54,8 @@ Claude, through your local **`claude` CLI** (no API key needed) or your own
 ### Rich Live Preview
 
 Markdown renders as you write, showing its syntax only on the line you're editing.
-[Vega-Lite](https://vega.github.io/vega-lite/) **charts**,
-[Mermaid](https://mermaid.js.org) **diagrams** (UML, sequence, ER…) and KaTeX
-**math** render in place — and **Export as PDF** (`⌘P`) keeps every one of them.
+**Charts**, **diagrams** (UML, sequence, ER…) and **LaTeX math** render in place —
+and **Export as PDF** (`⌘P`) keeps every one of them.
 
 ### Content Index
 
