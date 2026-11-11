@@ -15,6 +15,7 @@ import { openExternal, revealInFinder } from "../lib/api";
 import { markdownHref, relative, resolveHref, resolveWiki, vaultIndex, wikiName } from "../lib/links";
 import { openNoteAt, scrollToAnchor, slugify } from "./noteAnchor";
 import { notify } from "./collab";
+import { isConcealed } from "../lib/hidden";
 
 const WIKI = /\[\[([^[\]\n]+)\]\]/g;
 const CODE = new Set(["InlineCode", "FencedCode", "CodeBlock", "CodeText", "CodeInfo"]);
@@ -187,7 +188,8 @@ function applyWith(text: string, close: string) {
 
 function complete(ctx: CompletionContext, notePath: string): CompletionResult | null {
   const { root, notes } = vaultIndex();
-  const others = notes.filter((p) => p !== notePath);
+  // Hidden notes aren't suggested (links already written still open them).
+  const others = notes.filter((p) => p !== notePath && !isConcealed(p));
   if (others.length === 0 || inCode(ctx.state, ctx.pos)) return null;
 
   // [[… — list notes by their path, insert the shortest unique name.

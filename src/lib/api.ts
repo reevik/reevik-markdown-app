@@ -296,9 +296,9 @@ export interface ReorgReport {
   removed_folders: number;
 }
 
-/** Ask the AI for a folder per note. Read-only. */
-export function proposeReorganization(vault: string): Promise<ReorgProposal> {
-  return invoke("propose_reorganization", { vault });
+/** Ask the AI for a folder per note, leaving out `exclude` (hidden notes). Read-only. */
+export function proposeReorganization(vault: string, exclude: string[] = []): Promise<ReorgProposal> {
+  return invoke("propose_reorganization", { vault, exclude });
 }
 
 /** Move notes, keeping their links working. Reverse the moves to undo. */
@@ -330,4 +330,15 @@ export function restoreDiacritics(text: string): Promise<string> {
 /** Translate `text` into `language` (⌘⇧T). */
 export function translate(text: string, language: string): Promise<string> {
   return invoke("translate", { text, language });
+}
+
+// --- Hidden notes ---
+
+/** Notes hidden in this vault (absolute paths), from `.reevik/hidden.json`. */
+export function readHidden(vault: string): Promise<string[]> {
+  return invoke("read_hidden", { vault });
+}
+
+export function writeHidden(vault: string, paths: string[]): Promise<void> {
+  return invoke("write_hidden", { vault, paths });
 }

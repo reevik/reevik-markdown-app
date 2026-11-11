@@ -1,3 +1,4 @@
+import { isConcealed } from "./hidden";
 import { readContentIndex } from "./api";
 import type { ContentIndexEntry } from "./types";
 
@@ -59,5 +60,6 @@ export function loadContentIndex(
     throw err;
   });
   cache.set(key, { rev: revision, entries });
-  return entries;
+  // Hidden notes (and their headings) stay out of generated lists.
+  return entries.then((list) => list.filter((e) => !isConcealed(e.path)));
 }

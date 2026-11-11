@@ -623,6 +623,7 @@ function App() {
             onBeforeBulkMove={flushAllSaves}
             onAfterBulkMove={afterBulkMove}
             onSetLabels={setNoteLabels}
+            onCloseNotes={(paths) => removeTabs(paths, true)}
           />
           <Resizer width={leftWidth} setWidth={setLeftWidth} dir={1} min={180} max={480}
                    onReset={() => setLeftWidth(LEFT_DEFAULT)} />

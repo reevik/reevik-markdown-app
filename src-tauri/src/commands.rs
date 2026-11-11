@@ -756,10 +756,16 @@ fn vault_root(vault: &str, state: &AppState) -> Result<PathBuf, String> {
 #[tauri::command]
 pub async fn propose_reorganization(
     vault: String,
+    exclude: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<crate::reorganize::Proposal, String> {
     let root = vault_root(&vault, &state)?;
-    let notes = crate::reorganize::walk_notes(&root);
+    // Hidden notes are never sent to the AI, and so stay where they are.
+    let skip: std::collections::HashSet<PathBuf> = exclude.iter().map(PathBuf::from).collect();
+    let notes: Vec<PathBuf> = crate::reorganize::walk_notes(&root)
+        .into_iter()
+        .filter(|p| !skip.contains(p))
+        .collect();
     if notes.is_empty() {
         return Err("This vault has no notes to organize.".to_string());
     }
@@ -879,4 +885,46 @@ pub async fn translate(text: String, language: String) -> Result<String, String>
         return Err("The selection is too long — translate a section at a time.".to_string());
     }
     complete(llm::TRANSLATE_PROMPT, &format!("Target language: {language}\n\nText:\n{text}"), 16_000).await
+}
+
+// --- Hidden notes -------------------------------------------------------------------
+
+fn hidden_path(root: &Path) -> PathBuf {
+    root.join(".reevik").join("hidden.json")
+}
+
+/// Notes the author has hidden, as absolute paths. Stored relative to the vault
+/// in `.reevik/hidden.json`, since the vault sits at a different path on each Mac.
+#[tauri::command]
+pub fn read_hidden(vault: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let root = vault_root(&vault, &state)?;
+    let Ok(text) = std::fs::read_to_string(hidden_path(&root)) else {
+        return Ok(Vec::new());
+    };
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(v.get("hidden")
+        .and_then(|h| h.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.as_str())
+        // Relative only: an absolute or `..` entry would point outside the vault.
+        .filter(|p| !p.starts_with('/') && !p.split('/').any(|seg| seg == ".."))
+        .map(|p| root.join(p).to_string_lossy().into_owned())
+        .collect())
+}
+
+#[tauri::command]
+pub fn write_hidden(vault: String, paths: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let root = vault_root(&vault, &state)?;
+    let mut rel: Vec<String> = paths
+        .iter()
+        .filter_map(|p| Path::new(p).strip_prefix(&root).ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    rel.sort();
+    rel.dedup();
+    let path = hidden_path(&root);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let body = serde_json::json!({ "hidden": rel });
+    std::fs::write(&path, serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }

@@ -26,6 +26,7 @@ import ReorganizeModal from "./ReorganizeModal";
 import { createPortal } from "react-dom";
 import { colorOf, normalizeLabel, PALETTE, remapLabels, setLabelColor, useLabels } from "../lib/labels";
 import { setVaultIndex } from "../lib/links";
+import { hiddenPaths, remapHidden, setHidden, setShowingHidden, useHidden } from "../lib/hidden";
 import {
   cancelTaming,
   dismissResult,
@@ -49,6 +50,8 @@ interface Props {
   onAfterBulkMove: (moves: Move[]) => Promise<void>;
   /** Set a note's labels (its frontmatter `tags:`). */
   onSetLabels: (path: string, labels: string[]) => Promise<void>;
+  /** Close these notes' tabs (saving first) — they were just hidden. */
+  onCloseNotes: (paths: string[]) => void;
 }
 
 type Creating = { kind: "note" | "folder"; dir: string } | null;
@@ -114,6 +117,13 @@ function draggedPaths(dt: DataTransfer): string[] {
   }
   const one = dt.getData("text/plain");
   return one ? [one] : [];
+}
+
+/** The tree without the files in `drop`; folders stay, even if left empty. */
+function withoutFiles(nodes: TreeNode[], drop: Set<string>): TreeNode[] {
+  return nodes
+    .filter((n) => n.kind === "dir" || !drop.has(n.path))
+    .map((n) => (n.kind === "dir" ? { ...n, children: withoutFiles(n.children ?? [], drop) } : n));
 }
 
 /** Every note's path in the tree. */
@@ -183,6 +193,7 @@ export default function VaultSidebar({
   onBeforeBulkMove,
   onAfterBulkMove,
   onSetLabels,
+  onCloseNotes,
 }: Props) {
   const qc = useQueryClient();
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(activeVault.path));
@@ -210,11 +221,19 @@ export default function VaultSidebar({
   const [plan, setPlan] = useState<{ total: number; toRate: string[] } | null>(null);
   const [showStubs, setShowStubs] = useState(false);
   const notePaths = useMemo(() => collectNotePaths(tree ?? []), [tree]);
+  // Hidden notes: out of sight unless "show hidden" is on, and never sent to
+  // the AI by vault-wide actions either way.
+  const hid = useHidden(rootDir);
+  const shownNotes = useMemo(
+    () => (hid.showing ? notePaths : notePaths.filter((p) => !hid.hidden.has(p))),
+    [notePaths, hid.hidden, hid.showing],
+  );
+  const aiNotes = useMemo(() => notePaths.filter((p) => !hid.hidden.has(p)), [notePaths, hid.hidden]);
   // The editor resolves and completes links against this list of notes.
   useEffect(() => setVaultIndex(rootDir, notePaths), [rootDir, notePaths]);
   const stubPaths = useMemo(
-    () => new Set(notePaths.filter((p) => tamer.ratings[p]?.verdict === "stub")),
-    [notePaths, tamer.ratings],
+    () => new Set(shownNotes.filter((p) => tamer.ratings[p]?.verdict === "stub")),
+    [shownNotes, tamer.ratings],
   );
   // Nothing left to show (all deleted or edited): drop back to the full tree.
   useEffect(() => {
@@ -227,14 +246,14 @@ export default function VaultSidebar({
   // The label picker, for one note or for a whole selection.
   const [picker, setPicker] = useState<{ paths: string[]; x: number; y: number } | null>(null);
   const inUse = useMemo(() => {
-    const present = new Set(notePaths);
+    const present = new Set(shownNotes);
     const counts = new Map<string, number>();
     for (const [path, tags] of Object.entries(labels.notes)) {
       if (!present.has(path)) continue;
       for (const t of tags) counts.set(t, (counts.get(t) ?? 0) + 1);
     }
     return [...counts].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [labels.notes, notePaths]);
+  }, [labels.notes, shownNotes]);
   // A label that's no longer on any note drops out of the filter.
   useEffect(() => {
     setLabelFilter((f) => (f.every((l) => inUse.some(([u]) => u === l)) ? f : f.filter((l) => inUse.some(([u]) => u === l))));
@@ -256,7 +275,7 @@ export default function VaultSidebar({
     if (reorg?.phase === "analyzing" || reorg?.phase === "applying") return;
     setReorg({ phase: "analyzing", count: notePaths.length });
     try {
-      const proposal = await proposeReorganization(rootDir);
+      const proposal = await proposeReorganization(rootDir, [...hiddenPaths()]);
       setReorg((cur) =>
         cur?.phase !== "analyzing"
           ? cur // dismissed while waiting
@@ -294,7 +313,7 @@ export default function VaultSidebar({
     }
     dismissResult();
     try {
-      setPlan(await planRun(notePaths));
+      setPlan(await planRun(aiNotes));
     } catch (e) {
       console.error(e);
     }
@@ -317,6 +336,7 @@ export default function VaultSidebar({
     });
     remapRatings(oldPath, newPath);
     remapLabels(oldPath, newPath);
+    remapHidden(oldPath, newPath);
     onPathChanged(oldPath, newPath);
   };
 
@@ -325,8 +345,9 @@ export default function VaultSidebar({
     let nodes = sortTree(tree ?? [], sortDir);
     if (showStubs) nodes = filterByPaths(nodes, stubPaths);
     if (labelFilter.length > 0) nodes = filterByPaths(nodes, labelMatches);
+    if (!hid.showing && hid.hidden.size > 0) nodes = withoutFiles(nodes, hid.hidden);
     return filtering ? filterTree(nodes, filter.trim()) : nodes;
-  }, [tree, sortDir, filter, filtering, showStubs, stubPaths, labelFilter, labelMatches]);
+  }, [tree, sortDir, filter, filtering, showStubs, stubPaths, labelFilter, labelMatches, hid.showing, hid.hidden]);
 
   // Multi-selection, Finder-style: shift-click selects a range, ⌘-click
   // toggles one, a plain click opens a single note. Files only.
@@ -412,6 +433,19 @@ export default function VaultSidebar({
     }
     setMulti(new Set());
     await refreshTree();
+  }
+
+  function hideNotes(paths: string[], hide: boolean) {
+    setHidden(paths, hide);
+    // Out of sight means out of the tabs too.
+    if (hide && !hid.showing) onCloseNotes(paths);
+    setMulti(new Set());
+  }
+
+  function toggleShowHidden() {
+    const next = !hid.showing;
+    setShowingHidden(next);
+    if (!next) onCloseNotes([...hid.hidden]);
   }
 
   async function deleteMany(paths: string[]) {
@@ -651,6 +685,8 @@ export default function VaultSidebar({
             forceExpand={forceExpand}
             multi={selecting ? multi : EMPTY_SET}
             selPositions={selPositions}
+            hidden={hid.hidden}
+            onToggleHidden={(path) => hideNotes([path], !hid.hidden.has(path))}
             onSelectFile={selectFile}
             onMoveMany={(paths, dir) => void moveMany(paths, dir)}
             ratings={tamer.ratings}
@@ -694,6 +730,11 @@ export default function VaultSidebar({
             >
               Labels…
             </StripButton>
+            {[...multi].every((p) => hid.hidden.has(p)) ? (
+              <StripButton onClick={() => hideNotes([...multi], false)}>Unhide</StripButton>
+            ) : (
+              <StripButton onClick={() => hideNotes([...multi], true)}>Hide</StripButton>
+            )}
             <StripButton onClick={() => void deleteMany([...multi])}>Delete</StripButton>
           </Actions>
         </Strip>
@@ -710,7 +751,7 @@ export default function VaultSidebar({
         }}
         onRerateAll={() => {
           setPlan(null);
-          void runTaming(notePaths, notePaths);
+          void runTaming(aiNotes, notePaths);
         }}
         onCancelPlan={() => setPlan(null)}
         onToggleStubs={() => setShowStubs((v) => !v)}
@@ -764,6 +805,19 @@ export default function VaultSidebar({
         >
           {reorg?.phase === "analyzing" || reorg?.phase === "applying" ? <SpinnerIcon /> : <ReorganizeIcon />}
         </ToolbarButton>
+        <ToolbarButton
+          onClick={toggleShowHidden}
+          active={hid.showing}
+          title={
+            hid.showing
+              ? "Hide hidden notes again"
+              : hid.hidden.size > 0
+                ? `Show hidden notes (${hid.hidden.size})`
+                : "Show hidden notes — none are hidden"
+          }
+        >
+          {hid.showing ? <EyeIcon size={16} /> : <EyeOffIcon size={16} />}
+        </ToolbarButton>
 
         {/* Once the result line is dismissed, keep a way back to the review. */}
         {!tamer.job && !tamer.last && !plan && stubPaths.size > 0 && (
@@ -811,6 +865,9 @@ interface RowProps {
   multi: Set<string>;
   /** Each selected row's place in its block, for drawing the block as one. */
   selPositions: Map<string, SelPos>;
+  /** Hidden notes; only on screen while "show hidden" is on, drawn faded. */
+  hidden: Set<string>;
+  onToggleHidden: (path: string) => void;
   onSelectFile: (path: string, e: React.MouseEvent) => void;
   onMoveMany: (paths: string[], dir: string) => void;
 }
@@ -904,11 +961,29 @@ function TreeRow(props: RowProps) {
       >
         {isDir ? <Chevron open={isOpen} /> : <span className="w-3 shrink-0" />}
         {isDir ? <FolderIcon /> : <FileIcon />}
-        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        <span className={`min-w-0 flex-1 truncate ${!isDir && props.hidden.has(node.path) ? "opacity-50" : ""}`}>
+          {node.name}
+        </span>
+        {!isDir && props.hidden.has(node.path) && (
+          <span className="flex shrink-0 text-[var(--text-tertiary)]" title="Hidden note">
+            <EyeOffIcon size={12} />
+          </span>
+        )}
         {!isDir && props.labels[node.path] && <LabelDots labels={props.labels[node.path]} colors={props.labelColors} />}
         {!isDir && props.ratings[node.path]?.verdict === "stub" && <StubMark rating={props.ratings[node.path]} />}
 
         <span className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
+          {!isDir && (
+            <IconButton
+              title={props.hidden.has(node.path) ? "Unhide" : "Hide"}
+              onClick={(e) => {
+                e.stopPropagation();
+                props.onToggleHidden(node.path);
+              }}
+            >
+              {props.hidden.has(node.path) ? <EyeIcon size={13} /> : <EyeOffIcon size={13} />}
+            </IconButton>
+          )}
           {!isDir && (
             <IconButton
               title="Labels"
@@ -1012,20 +1087,24 @@ function ToolbarButton({
   onClick,
   title,
   danger,
+  active,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   title: string;
   danger?: boolean;
+  /** A toggle that's on. */
+  active?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
       aria-label={title}
-      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] ${
-        danger ? "hover:bg-red-500/20 hover:text-red-400" : "hover:bg-black/10"
-      }`}
+      aria-pressed={active}
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:text-[var(--text-primary)] ${
+        active ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]" : "text-[var(--text-tertiary)]"
+      } ${danger ? "hover:bg-red-500/20 hover:text-red-400" : "hover:bg-black/10"}`}
     >
       {children}
     </button>
@@ -1682,5 +1761,24 @@ function LabelBar({
         </button>
       )}
     </div>
+  );
+}
+
+function EyeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M9.9 5.2A10.4 10.4 0 0112 5c6.4 0 10 7 10 7a17.7 17.7 0 01-3.2 4.2M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7a9.7 9.7 0 005.4-1.6" />
+      <path d="M9.9 9.9a3 3 0 004.2 4.2" />
+      <path d="M3 3l18 18" />
+    </svg>
   );
 }

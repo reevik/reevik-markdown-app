@@ -27,122 +27,50 @@
 
 ---
 
-## Features
+## What makes it different
 
-### Vaults & files
+### An AI that works on the note, not beside it
 
-- **Obsidian-style vaults** — a vault is just a folder of `.md` files on disk. No
-  database, no lock-in; your notes stay plain Markdown you can edit anywhere.
-- **Vault launcher** on startup: open any folder as a vault, create a new one, or
-  pick from your recent vaults.
-- **File tree** with live filtering, sorting and expand/collapse all.
-- **Drag & drop** notes and folders to reorganise — open tabs follow the move.
-- Create, rename and delete notes and folders inline.
+Claude, through your local **`claude` CLI** (no API key needed) or your own
+**Anthropic API key** — or **GitHub Copilot**.
 
-### Editor
+- **Editorial chat** (`⌘⇧E`) — talk the note through with the agent. Ask it to add,
+  change or remove something and it edits the note directly, as a single `⌘Z`.
+- **Analyze** (`⌘⇧A`) — a quality score for clarity, structure, grammar and tone,
+  and specific edits you apply with a click.
+- **Find references** (`⌘⇧F`) — searches the web for papers, documentation and
+  articles on your topic; every citation comes from a real search result.
+- **Rephrase, restore diacritics, translate** (`⌘⇧R`, `⌘⇧D`, `⌘⇧T`) on any
+  selection. Diacritic restoration is checked to change accents and nothing else.
 
-- **Live Preview** — Markdown renders as you write, and the raw syntax reveals
-  itself only on the line you're editing. A source mode (`⌘/`) is a keystroke away.
-- **Tabs** for multiple open notes, each with its own buffer, so unsaved edits
-  survive tab switches.
-- **Autosave** to disk, debounced per note.
-- **Status bar** with file type, size, last-edited time and save state.
-- **Typography settings** — pick the editor font and size; applies instantly.
+### Vault housekeeping
 
-### Rich content
+- **Clean up** — rates every note for completeness in the background and marks the
+  half-started ones that look safe to delete.
+- **Reorganize** — proposes folders from what your notes are actually about. Review
+  the structure before and after; every image and link keeps working, and one click
+  undoes it.
 
-- **Charts** — [Vega-Lite](https://vega.github.io/vega-lite/) specs in a
-  ` ```vega-lite ` block become live charts, with drag-to-resize and alignment.
-- **Diagrams** — [Mermaid](https://mermaid.js.org) blocks, including UML class,
-  sequence, state and ER diagrams.
-- **Math** — LaTeX via KaTeX, inline (`$…$`) and display (`$$…$$`).
-- **Images** — drag, drop or paste straight into a note; resize and align them.
-- **Code blocks** with syntax highlighting, plus tables, task lists and quotes.
-- **YAML frontmatter** collapses into a tidy *Document Metadata* pill.
-- **Content Index** — a ` ```content-index ` block renders a Confluence-style
-  contents list of every note beside and below the current one. See below.
+### Rich Live Preview
+
+Markdown renders as you write, showing its syntax only on the line you're editing.
+[Vega-Lite](https://vega.github.io/vega-lite/) **charts**,
+[Mermaid](https://mermaid.js.org) **diagrams** (UML, sequence, ER…) and KaTeX
+**math** render in place — and **Export as PDF** (`⌘P`) keeps every one of them.
 
 ### Content Index
 
-Drop this into a note:
+A ` ```content-index ` block renders an always-current contents list of every note
+in its folder and below, read from the vault each time it draws so it never goes
+stale. `|2` caps the depth; `include-headers=2` adds each note's headings, linked.
 
-````markdown
-```content-index
-```
-````
+### Made for Obsidian vaults
 
-and it renders as an ordinary bulleted Markdown list — one linked entry per note
-in the note's own folder and everything under it, pages first, then each
-sub-folder nested under its own bullet.
-
-The block is **immutable**: it holds no text of its own, so there is nothing to
-edit and nothing that can fall out of step with the vault. The list is read from
-disk every time it draws, and it redraws whenever the hierarchy changes — a new
-note, a rename, a move, a delete, or a note saving under a new `title:` —
-including changes made outside the app, which it picks up when the window
-regains focus.
-
-Each entry is titled by the `title:` key in that note's YAML frontmatter, and by
-its file name when it has none. Clicking one opens it in a tab. Folders holding
-no Markdown are left out, as is the note hosting the index.
-
-Add a number to cap how many folder levels appear — ` ```content-index|2 ` shows
-this folder and one level below it.
-
-`include-headers=N` pulls each note's own headings into the list, down to that
-`#` level, each one linking straight to that spot in the note:
-
-````markdown
-```content-index|include-headers=2
-```
-````
-
-lists every `#` and `##` in every note, indented by its `#` count under the page
-it belongs to. Headings inside fenced code and in frontmatter are ignored, and
-anchors use the usual GitHub slug (`## Rate Limiting` → `#rate-limiting`).
-
-Clicking the block puts the cursor in it and swaps the rendered list for the
-Markdown it stands for — the actual `- [Title](path.md)` lines, indented by
-level. That view is **read-only**, as is the block itself: typing, pasting and
-backspacing into it do nothing. Click anywhere else to go back to the list.
-
-Its **settings** are the exception, and they have their own surface: hover the
-block and a small bar appears top-right with **Depth** and **Headings**. Those
-rewrite the fence for you — the only edit the block accepts. So the list and its
-source stay immutable while the component itself stays configurable.
-
-To remove a block, select the whole of it (or a range around it) and delete;
-partial edits at its edges are rejected.
-
-`⌘/` (Markdown source mode) is unaffected — it shows the file as it really is on
-disk, which is the bare ` ```content-index ` fence.
-
-### AI writing agent
-
-Powered by Claude, through either the local **`claude` CLI** (no API key needed) or
-your own **Anthropic API key**, stored in the macOS Keychain.
-
-- **Editorial review** runs when you ask for it (`⌘⇧A`, or **Analyze document** in the panel): a **quality score**
-  (stars, percentage and per-dimension ratings for clarity, structure, grammar and
-  tone), a one-line assessment, and a list of concrete edits.
-- **Click-to-apply suggestions** — each is a self-contained original → replacement
-  edit you accept individually. The agent proposes *local* changes only; it never
-  rewrites your document wholesale.
-- **Rephrase selection** (`⌘⇧R`) with Google-Docs-style collaboration markers.
-- **Find references** (`⌘⇧F`) genuinely searches the web for papers, documentation
-  and articles on your topic, then lists them with a summary and why each is
-  relevant — open in your browser, or insert as Markdown citations.
-- **Streaming results** appear progressively with a live elapsed timer, rather than
-  after a long silence.
-- **Model selection** — Opus 4.8, Sonnet 5, Haiku 4.5, or your backend's default.
-
-### Writing tools
-
-- **Command palette** (`⌘K`) — fuzzy search across every action, with shortcuts shown.
-- **Floating insert toolbar** with 16 insert actions; drag it anywhere and it stays put.
-- **Export as PDF** (`⌘P`) — charts, diagrams, math and images are pre-rendered into
-  a clean printed article with proper page breaks.
-- Three resizable, collapsible panes; your layout is remembered between launches.
+- A vault is a plain folder of Markdown files — no database, no lock-in.
+- **`[[Wikilinks]]`** with autocomplete, alongside ordinary relative links.
+- **Coloured labels**, stored as frontmatter `tags` so Obsidian sees them too, with
+  filtering by label.
+- **Hidden notes** stay out of sight, and are never sent to the AI.
 
 ## Keyboard shortcuts
 

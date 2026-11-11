@@ -366,6 +366,8 @@ pub fn run() {
             commands::write_label_colors,
             commands::restore_diacritics,
             commands::translate,
+            commands::read_hidden,
+            commands::write_hidden,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
