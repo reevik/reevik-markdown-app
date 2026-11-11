@@ -70,27 +70,6 @@ stale. `|2` caps the depth; `include-headers=2` adds each note's headings, linke
   filtering by label.
 - **Hidden notes** stay out of sight, and are never sent to the AI.
 
-## Keyboard shortcuts
-
-| | |
-|---|---|
-| `⌘N` / `⌘⇧N` | New note / new folder |
-| `⌘W` / `⌘⇧W` | Close tab / close window |
-| `⌘P` | Export as PDF |
-| `⌘K` / `⌘⇧P` | Command palette |
-| `⌘/` | Toggle Markdown source |
-| `⌘⌥1` `⌘⌥2` `⌘⌥3` | Toggle sidebar / AI panel / toolbar |
-| `⌘⇧E` | Editorial chat |
-| `⌘⇧A` | Analyze document |
-| `⌘⇧F` | Find references |
-| `⌘⇧R` | Rephrase selection |
-| `⌘⇧D` | Restore diacritics |
-| `⌘⇧T` | Translate selection |
-| `⌘⇧O` | Open vault |
-| `⌘,` | Settings |
-| `⌘B` `⌘I` `⌘E` `⌘⇧K` | Bold / italic / inline code / link |
-| `⌘⇧X` `⌘⇧C` `⌘⇧L` `⌘⇧U` | Strikethrough / code block / list / checklist |
-
 ## Getting started
 
 Download the latest artifact from releases and install it. Recent changes are in
