@@ -41,6 +41,11 @@ Claude, through your local **`claude` CLI** (no API key needed) or your own
   articles on your topic; every citation comes from a real search result.
 - **Rephrase, restore diacritics, translate** (`⌘⇧R`, `⌘⇧D`, `⌘⇧T`) on any
   selection. Diacritic restoration is checked to change accents and nothing else.
+
+  <p align="center">
+    <img src="docs/screenshots/diacritics.gif" width="640" alt="Turkish typed without accents, selected and restored with ⌘⇧D while the author keeps typing on the next line">
+  </p>
+
 - **Collaborative editing with the agent** — Google-Docs style: the passage the agent
   is working on carries its flag, your cursor carries yours, and you keep writing
   elsewhere in the note while it works.
