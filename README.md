@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/GET%201.7.0-%23000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="version">
+  <a href="https://github.com/reevik/reeviks-markdown-app/releases/tag/v1.7.0"><img src="https://img.shields.io/badge/GET%201.7.0-%23000000.svg?style=for-the-badge&logo=apple&logoColor=white" alt="version"></a>
   <img src="https://img.shields.io/badge/apache%202.0-%23C71A36.svg?style=for-the-badge&logo=apachemaven&logoColor=white" alt="platform">
 </p>
 
